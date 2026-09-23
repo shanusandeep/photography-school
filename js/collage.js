@@ -72,17 +72,42 @@ function ensureFonts(theme) {
 /* ============================================================
    geometry — shared by preview, thumbnails and export
    ============================================================ */
+// every editable text field for a theme+layout pair
+function slotsFor(theme, layout) { return [...theme.slots, ...(layout.slots || [])]; }
+
+// text cells claim slots in cell order, first non-empty unused candidate wins —
+// so "Split Banner" shows the age numeral on Birthday but the names on Wedding
+function resolveTextSlots(theme, layout) {
+  const defs = Object.fromEntries(slotsFor(theme, layout).map(s => [s.id, s]));
+  const used = new Set();
+  return layout.cells.map((c) => {
+    if (c.type !== 'text') return null;
+    const want = c.style === 'title' ? 2 : 1;
+    const picked = [];
+    for (const id of c.slots) {
+      const s = defs[id];
+      if (!s || used.has(id) || !slotText(s).trim()) continue;
+      picked.push(s); used.add(id);
+      if (picked.length === want) break;
+    }
+    return picked;
+  });
+}
+
 function geometry(W, H, opts = {}) {
   const theme = opts.theme || currentTheme();
   const layout = opts.layout || currentLayout();
-  const m = theme.margin * Math.min(W, H);
-  const bandH = theme.band.h * H;
+  const u = Math.min(W, H);
+  const m = theme.margin * u;
+  const noBand = layout.band === false;
+  const bandH = noBand ? 0 : theme.band.h * H;
   const top = theme.band.pos === 'top';
-  const content = { x: m, y: top ? bandH : m, w: W - 2 * m, h: H - bandH - m };
+  const content = noBand ? { x: m, y: m, w: W - 2 * m, h: H - 2 * m } : { x: m, y: top ? bandH : m, w: W - 2 * m, h: H - bandH - m };
   const band = { x: m, y: top ? 0 : H - bandH, w: W - 2 * m, h: bandH };
-  const insetB = Math.min(W, H) * 0.012;
+  const insetB = u * 0.012;
 
   const cells = layout.cells.map((c) => {
+    const type = c.type || 'photo';
     if (layout.polaroid) {
       const frameW = c.w * Math.min(content.w, content.h * 1.02);
       const frameH = frameW * 1.2;
@@ -90,13 +115,65 @@ function geometry(W, H, opts = {}) {
       const rect = { x: center.x - frameW / 2, y: center.y - frameH / 2, w: frameW, h: frameH };
       const pad = frameW * 0.065;
       const photo = { x: rect.x + pad, y: rect.y + pad, w: frameW - 2 * pad, h: frameW - 2 * pad };
-      return { rect, photo, center, rot: (c.rot || 0) * Math.PI / 180, polaroid: true };
+      return { def: c, type, rect, photo, center, rot: (c.rot || 0) * Math.PI / 180, polaroid: true, radius: 0 };
     }
     const rect = { x: content.x + c.x * content.w, y: content.y + c.y * content.h, w: c.w * content.w, h: c.h * content.h };
-    const photo = c.inset ? { x: rect.x + insetB, y: rect.y + insetB, w: rect.w - 2 * insetB, h: rect.h - 2 * insetB } : rect;
-    return { rect, photo, center: { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 }, rot: 0, inset: !!c.inset };
+    const b = c.frame ? insetB * 1.3 : c.inset ? insetB : 0;
+    const photo = b ? { x: rect.x + b, y: rect.y + b, w: rect.w - 2 * b, h: rect.h - 2 * b } : rect;
+    return { def: c, type, rect, photo, center: { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 },
+             rot: (c.rot || 0) * Math.PI / 180, inset: !!c.inset, frame: !!c.frame, tape: !!c.tape, radius: (c.radius || 0) * u };
   });
-  return { W, H, theme, layout, content, band, cells };
+  const decor = (layout.decor || []).map(d => ({ x: content.x + d.x * content.w, y: content.y + d.y * content.h, r: d.r * u }));
+  return { W, H, u, theme, layout, content, band, cells, decor, textSlots: resolveTextSlots(theme, layout) };
+}
+
+const isPhotoCell = (i, layout = currentLayout()) => (layout.cells[i].type || 'photo') === 'photo';
+
+function pathRoundRect(ctx, r, radius) {
+  ctx.beginPath();
+  if (radius > 0 && ctx.roundRect) ctx.roundRect(r.x, r.y, r.w, r.h, radius);
+  else ctx.rect(r.x, r.y, r.w, r.h);
+}
+
+/* ---- board palette: dominant colours pulled from the placed photos ---- */
+function photoPalette(p) {
+  if (p.palette) return p.palette;
+  const c = document.createElement('canvas'); c.width = 24; c.height = 24;
+  const cx = c.getContext('2d', { willReadFrequently: true });
+  cx.drawImage(p.bmp, 0, 0, 24, 24);
+  const d = cx.getImageData(0, 0, 24, 24).data;
+  const buckets = new Map();
+  for (let i = 0; i < d.length; i += 4) {
+    const key = `${d[i] >> 5},${d[i + 1] >> 5},${d[i + 2] >> 5}`;
+    const b = buckets.get(key) || { n: 0, r: 0, g: 0, b: 0 };
+    b.n++; b.r += d[i]; b.g += d[i + 1]; b.b += d[i + 2];
+    buckets.set(key, b);
+  }
+  const sorted = [...buckets.values()].sort((a, b) => b.n - a.n).map(b => [b.r / b.n, b.g / b.n, b.b / b.n]);
+  const picked = [];
+  for (const col of sorted) {
+    if (picked.every(q => Math.hypot(q[0] - col[0], q[1] - col[1], q[2] - col[2]) > 55)) picked.push(col);
+    if (picked.length === 3) break;
+  }
+  p.palette = picked.map(([r, g, b]) => `rgb(${r | 0},${g | 0},${b | 0})`);
+  return p.palette;
+}
+function boardPalette(theme) {
+  const out = [];
+  const toRgb = (s) => s.match(/\d+/g).map(Number);
+  for (const c of state.cells) {
+    const p = photoById(c.photoId);
+    if (!p) continue;
+    for (const col of photoPalette(p).slice(0, 2)) {
+      const v = toRgb(col);
+      if (out.every(q => Math.hypot(...toRgb(q).map((x, k) => x - v[k])) > 40)) out.push(col);
+      if (out.length === 6) return out;
+    }
+  }
+  const fill = [theme.palette.accent, theme.palette.mat, theme.palette.panel, theme.palette.text, theme.palette.bg, theme.palette.accent];
+  let k = 0;
+  while (out.length < 6) out.push(fill[k++ % fill.length]);
+  return out;
 }
 
 // cover-fit a photo into a box, then apply zoom + normalized pan
@@ -132,13 +209,20 @@ function drawBackground(ctx, g) {
   }
 }
 
+function rotateTo(ctx, cell) {
+  if (cell.rot) { ctx.translate(cell.center.x, cell.center.y); ctx.rotate(cell.rot); ctx.translate(-cell.center.x, -cell.center.y); }
+}
+
 function drawCell(ctx, g, i, image, opts = {}) {
-  const cell = g.cells[i], c = state.cells[i];
+  const cell = g.cells[i];
+  if (cell.type === 'text') return drawTextCell(ctx, g, i);
+  if (cell.type === 'swatch') return drawSwatchCell(ctx, g, i);
+  const c = state.cells[i];
   const { theme } = g;
   ctx.save();
-  if (cell.rot) { ctx.translate(cell.center.x, cell.center.y); ctx.rotate(cell.rot); ctx.translate(-cell.center.x, -cell.center.y); }
+  rotateTo(ctx, cell);
 
-  if (cell.polaroid) {
+  if (cell.polaroid || cell.frame) {
     ctx.save();
     ctx.shadowColor = 'rgba(0,0,0,.35)'; ctx.shadowBlur = g.W * 0.02; ctx.shadowOffsetY = g.W * 0.006;
     ctx.fillStyle = theme.palette.mat;
@@ -150,17 +234,18 @@ function drawCell(ctx, g, i, image, opts = {}) {
   }
 
   const p = cell.photo;
-  ctx.beginPath(); ctx.rect(p.x, p.y, p.w, p.h); ctx.clip();
+  ctx.save();
+  pathRoundRect(ctx, p, cell.radius); ctx.clip();
   if (image) {
     const f = fitPhoto(p, image.width, image.height, c);
     ctx.drawImage(image, f.dx, f.dy, f.dw, f.dh);
   } else {
     const dark = isDark(theme.palette.bg);
-    ctx.fillStyle = cell.polaroid ? 'rgba(0,0,0,.08)' : dark ? 'rgba(255,255,255,.07)' : 'rgba(0,0,0,.06)';
+    ctx.fillStyle = (cell.polaroid || cell.frame) ? 'rgba(0,0,0,.08)' : dark ? 'rgba(255,255,255,.07)' : 'rgba(0,0,0,.06)';
     ctx.fillRect(p.x, p.y, p.w, p.h);
     if (opts.preview) {
       const s = Math.min(p.w, p.h);
-      ctx.strokeStyle = dark && !cell.polaroid ? 'rgba(255,255,255,.25)' : 'rgba(0,0,0,.22)';
+      ctx.strokeStyle = dark && !cell.polaroid && !cell.frame ? 'rgba(255,255,255,.25)' : 'rgba(0,0,0,.22)';
       ctx.lineWidth = 1.5; ctx.setLineDash([6, 5]);
       ctx.strokeRect(p.x + 4, p.y + 4, p.w - 8, p.h - 8);
       ctx.setLineDash([]);
@@ -171,11 +256,172 @@ function drawCell(ctx, g, i, image, opts = {}) {
     }
   }
   ctx.restore();
+
+  if (cell.def.caption) drawCaption(ctx, g, cell);
+  if (cell.tape) drawTape(ctx, g, cell);
+  ctx.restore();
+}
+
+/* ---- text on the board ---- */
+const inkOn = (bg) => isDark(bg) ? '#f4efe6' : '#1a1712';   // legible ink for a given panel colour
+
+function setTracking(ctx, px) { if ('letterSpacing' in ctx) ctx.letterSpacing = `${px}px`; }
+function wrapLines(ctx, text, maxW) {
+  const words = text.split(/\s+/), lines = []; let line = '';
+  for (const w of words) {
+    const t = line ? `${line} ${w}` : w;
+    if (ctx.measureText(t).width > maxW && line) { lines.push(line); line = w; } else line = t;
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+function tornStripPath(ctx, r, u) {
+  const rnd = rng(31), amp = u * 0.007, step = Math.max(6, r.w / 48);
+  ctx.beginPath(); ctx.moveTo(r.x, r.y);
+  for (let x = r.x; x <= r.x + r.w; x += step) ctx.lineTo(x, r.y + (rnd() - 0.5) * amp * 2);
+  ctx.lineTo(r.x + r.w, r.y + r.h);
+  for (let x = r.x + r.w; x >= r.x; x -= step) ctx.lineTo(x, r.y + r.h + (rnd() - 0.5) * amp * 2);
+  ctx.closePath();
+}
+
+function drawTextCell(ctx, g, i) {
+  const cell = g.cells[i], def = cell.def, theme = g.theme, r = cell.rect, u = g.u;
+  const slots = g.textSlots[i] || [];
+  const vals = slots.map(s => slotText(s).trim());
+  ctx.save();
+  rotateTo(ctx, cell);
+  let ink = theme.palette.text;
+  if (def.bg === 'panel') { ctx.fillStyle = theme.palette.panel; ctx.fillRect(r.x, r.y, r.w, r.h); ink = inkOn(theme.palette.panel); }
+  else if (def.bg === 'mat') {
+    ctx.save(); ctx.shadowColor = 'rgba(0,0,0,.25)'; ctx.shadowBlur = u * 0.015; ctx.shadowOffsetY = u * 0.004;
+    ctx.fillStyle = theme.palette.mat;
+    if (def.torn) { tornStripPath(ctx, r, u); ctx.fill(); } else ctx.fillRect(r.x, r.y, r.w, r.h);
+    ctx.restore(); ink = inkOn(theme.palette.mat);
+  }
+  if (!vals.length) { ctx.restore(); return; }
+  const align = def.align || 'center';
+  const padX = r.w * 0.07;
+  const ax = align === 'left' ? r.x + padX : r.x + r.w / 2;
+  ctx.textAlign = align; ctx.textBaseline = 'alphabetic'; ctx.fillStyle = ink;
+  const maxW = r.w - 2 * padX;
+
+  switch (def.style) {
+    case 'title': {
+      const [a, b] = vals;
+      const size = fitFont(ctx, a, theme, Math.min(r.h * (b ? 0.34 : 0.4), r.w * 0.16), 'display', maxW);
+      ctx.fillText(a, ax, r.y + r.h * (b ? 0.5 : 0.6));
+      if (b) {
+        const s2 = fitFont(ctx, b.toUpperCase(), theme, Math.min(r.h * 0.11, size * 0.4), 'body', maxW);
+        setTracking(ctx, s2 * 0.28);
+        fitFont(ctx, b.toUpperCase(), theme, s2, 'body', maxW);
+        ctx.globalAlpha = 0.85; ctx.fillText(b.toUpperCase(), ax, r.y + r.h * 0.72);
+        setTracking(ctx, 0);
+      }
+      break;
+    }
+    case 'quote': {
+      const size = Math.min(r.h * 0.1, r.w * 0.085);
+      ctx.font = `italic 400 ${size}px "Hanken Grotesk", sans-serif`;
+      const lines = wrapLines(ctx, vals[0], maxW).slice(0, 6);
+      const lh = size * 1.35, y0 = r.y + r.h / 2 - (lines.length - 1) * lh / 2 + size * 0.35;
+      lines.forEach((ln, k) => ctx.fillText(ln, ax, y0 + k * lh));
+      break;
+    }
+    case 'big': {
+      const size = fitFont(ctx, vals[0], theme, r.h * 0.82, 'display', r.w * 0.9);
+      ctx.fillText(vals[0], ax, r.y + r.h / 2 + size * 0.36);
+      break;
+    }
+    case 'label': {
+      const t = vals[0].toUpperCase();
+      ctx.fillStyle = def.bg === 'none' ? theme.palette.mat : ink;
+      if (def.bg === 'none') { ctx.shadowColor = 'rgba(0,0,0,.55)'; ctx.shadowBlur = u * 0.012; }
+      let size = Math.min(r.h * 0.6, u * 0.04);
+      setTracking(ctx, size * 0.3);
+      size = fitFont(ctx, t, theme, size, 'body', maxW);
+      ctx.fillText(t, ax, r.y + r.h / 2 + size * 0.36);
+      setTracking(ctx, 0);
+      break;
+    }
+  }
+  ctx.restore();
+}
+
+function drawSwatchCell(ctx, g, i) {
+  const cell = g.cells[i], def = cell.def, theme = g.theme, r = cell.rect;
+  const pal = boardPalette(theme);
+  ctx.save();
+  if (def.bg === 'panel') { ctx.fillStyle = theme.palette.panel; ctx.fillRect(r.x, r.y, r.w, r.h); }
+  const ring = theme.palette.mat;
+  if (def.style === 'grid') {
+    const s = Math.min(r.w / 4.4, r.h / 3.2), gap = s * 0.22;
+    const x0 = r.x + r.w / 2 - (3 * s + 2 * gap) / 2, y0 = r.y + r.h / 2 - (2 * s + gap) / 2;
+    pal.forEach((col, k) => { ctx.fillStyle = col; ctx.fillRect(x0 + (k % 3) * (s + gap), y0 + Math.floor(k / 3) * (s + gap), s, s); });
+  } else if (def.style === 'chips') {
+    const n = 5, s = Math.min(r.h * 0.8, r.w / (n * 1.3)), gap = s * 0.3;
+    const x0 = r.x, y0 = r.y + r.h / 2 - s / 2;
+    pal.slice(0, n).forEach((col, k) => { ctx.fillStyle = col; ctx.fillRect(x0 + k * (s + gap), y0, s, s); });
+  } else {
+    const n = 3, rad = Math.min(r.w * 0.4, r.h / (n * 2.4));
+    pal.slice(0, n).forEach((col, k) => {
+      const cy = r.y + r.h / 2 + (k - 1) * rad * 2.4;
+      ctx.beginPath(); ctx.arc(r.x + r.w / 2, cy, rad, 0, Math.PI * 2);
+      ctx.fillStyle = col; ctx.fill(); ctx.lineWidth = rad * 0.18; ctx.strokeStyle = ring; ctx.stroke();
+    });
+  }
+  ctx.restore();
+}
+
+function drawDecor(ctx, g) {
+  if (!g.decor.length) return;
+  const pal = boardPalette(g.theme);
+  ctx.save();
+  g.decor.forEach((d, k) => {
+    ctx.beginPath(); ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2);
+    ctx.fillStyle = pal[(k * 2 + 1) % pal.length]; ctx.fill();
+    ctx.lineWidth = d.r * 0.28; ctx.strokeStyle = g.theme.palette.mat; ctx.stroke();
+  });
+  ctx.restore();
+}
+
+function drawCaption(ctx, g, cell) {
+  const theme = g.theme, u = g.u, p = cell.photo;
+  const slot = slotsFor(theme, g.layout).find(s => s.id === cell.def.caption);
+  const text = slot ? slotText(slot).trim() : '';
+  if (!text) return;
+  const size = Math.max(9, u * 0.026);
+  ctx.save();
+  ctx.font = `400 ${size}px "Hanken Grotesk", sans-serif`;
+  setTracking(ctx, size * 0.32);
+  const tw = ctx.measureText(text).width, padX = size * 1.2, h = size * 2.1;
+  const x = p.x + p.w / 2 - (tw + 2 * padX) / 2, y = p.y + p.h / 2 - h / 2;
+  ctx.fillStyle = theme.palette.mat; ctx.globalAlpha = 0.92;
+  ctx.fillRect(x, y, tw + 2 * padX, h);
+  ctx.globalAlpha = 1; ctx.fillStyle = inkOn(theme.palette.mat);
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.fillText(text, x + padX, y + h / 2 + size * 0.05);
+  setTracking(ctx, 0);
+  ctx.restore();
+}
+
+function drawTape(ctx, g, cell) {
+  const r = cell.rect, u = g.u;
+  const w = Math.max(r.w * 0.2, u * 0.06), h = u * 0.02;
+  ctx.save();
+  ctx.fillStyle = 'rgba(228, 216, 186, .82)';
+  [[r.x + r.w * 0.14, -0.12], [r.x + r.w * 0.86, 0.1]].forEach(([x, a]) => {
+    ctx.save(); ctx.translate(x, r.y); ctx.rotate(a);
+    ctx.fillRect(-w / 2, -h / 2, w, h);
+    ctx.restore();
+  });
+  ctx.restore();
 }
 
 function drawForeground(ctx, g) {
-  drawOrnaments(ctx, g);
-  drawTextBand(ctx, g);
+  drawDecor(ctx, g);
+  if (g.band.h > 0 || g.theme.ornament === 'corners') drawOrnaments(ctx, g);
+  if (g.band.h > 0) drawTextBand(ctx, g);
 }
 
 /* ---- seeded scatter so ornaments land identically at any size ---- */
@@ -371,12 +617,14 @@ async function addPhotos(files, targetCell = null) {
   let first = true;
   for (const p of added) {
     let idx = -1;
-    if (first && targetCell !== null) idx = targetCell;
-    else idx = state.cells.findIndex(c => !c.photoId);
+    if (first && targetCell !== null && isPhotoCell(targetCell)) idx = targetCell;
+    else idx = firstEmptyPhotoCell();
     if (idx >= 0) state.cells[idx] = { ...emptyCell(), photoId: p.id };
     first = false;
   }
 }
+const firstEmptyPhotoCell = () => state.cells.findIndex((c, i) => !c.photoId && isPhotoCell(i));
+const photoCellIndices = () => state.cells.map((_, i) => i).filter(i => isPhotoCell(i));
 
 /* ============================================================
    state operations
@@ -391,7 +639,8 @@ function setLayout(id) {
   const order = [...placed, ...state.photos.map(p => p.id).filter(pid => !placed.includes(pid))];
   state.layoutId = id;
   state.cells = currentLayout().cells.map(emptyCell);
-  order.forEach((pid, i) => { if (i < state.cells.length) state.cells[i].photoId = pid; });
+  const targets = photoCellIndices();
+  order.forEach((pid, k) => { if (k < targets.length) state.cells[targets[k]].photoId = pid; });
   state.ui.selected = null; state.ui.swapFrom = null; state.undo = null;
 }
 function setTheme(id) { state.themeId = id; state.accent = null; }
@@ -422,6 +671,7 @@ function resetAll() {
 
 // effective print resolution of a cell's photo at a given export size
 function cellQuality(g, i) {
+  if (!isPhotoCell(i)) return null;
   const c = state.cells[i], p = photoById(c.photoId);
   if (!p) return null;
   const f = fitPhoto(g.cells[i].photo, p.iw, p.ih, c);
@@ -447,7 +697,7 @@ async function exportCollage(preset, format) {
       drawBackground(ctx, g);
       // decode originals one at a time, sized exactly to what the cell draws, then release
       for (let i = 0; i < g.cells.length; i++) {
-        const c = state.cells[i], p = photoById(c.photoId);
+        const c = state.cells[i], p = isPhotoCell(i) ? photoById(c.photoId) : null;
         if (!p) { drawCell(ctx, g, i, null); continue; }
         const f = fitPhoto(g.cells[i].photo, p.iw, p.ih, c);
         const url = URL.createObjectURL(p.file);
@@ -643,11 +893,14 @@ export function viewCollage(app) {
   function renderLayouts() {
     const box = $('[data-layouts]');
     const theme = currentTheme(), shape = currentShape();
-    box.innerHTML = LAYOUTS.map(l => `
+    const btn = (l) => `
       <button class="pt-layout-btn ${l.id === state.layoutId ? 'on' : ''}" data-layout="${l.id}" title="${l.desc}">
         <canvas width="${Math.round(88 * (shape.ar >= 1 ? 1 : shape.ar))}" height="${Math.round(88 * (shape.ar >= 1 ? 1 / shape.ar : 1))}"></canvas>
         <span>${theme.suggested.includes(l.id) ? '★ ' : ''}${l.name}</span>
-      </button>`).join('');
+      </button>`;
+    box.innerHTML =
+      `<div class="pt-group mono">Moodboard</div>${LAYOUTS.filter(l => l.group === 'moodboard').map(btn).join('')}` +
+      `<div class="pt-group mono">Classic</div>${LAYOUTS.filter(l => l.group !== 'moodboard').map(btn).join('')}`;
     box.querySelectorAll('[data-layout]').forEach(btn => {
       const c = btn.querySelector('canvas'), cx = c.getContext('2d');
       const layout = LAYOUTS.find(l => l.id === btn.dataset.layout);
@@ -655,20 +908,22 @@ export function viewCollage(app) {
       cx.fillStyle = theme.palette.bg; cx.fillRect(0, 0, c.width, c.height);
       cx.fillStyle = isDark(theme.palette.bg) ? 'rgba(255,255,255,.12)' : 'rgba(0,0,0,.1)';
       cx.fillRect(g.band.x, g.band.y, g.band.w, g.band.h);
-      cx.fillStyle = accentColor();
+      const ink = isDark(theme.palette.bg) ? 'rgba(255,255,255,.28)' : 'rgba(0,0,0,.18)';
       g.cells.forEach(cell => {
         cx.save();
-        if (cell.rot) { cx.translate(cell.center.x, cell.center.y); cx.rotate(cell.rot); cx.translate(-cell.center.x, -cell.center.y); }
-        cx.globalAlpha = 0.85; cx.fillRect(cell.rect.x, cell.rect.y, cell.rect.w, cell.rect.h);
+        rotateTo(cx, cell);
+        cx.globalAlpha = 0.85;
+        cx.fillStyle = cell.type === 'photo' ? accentColor() : ink;
+        cx.fillRect(cell.rect.x, cell.rect.y, cell.rect.w, cell.rect.h);
         cx.restore();
       });
-      btn.addEventListener('click', () => { setLayout(btn.dataset.layout); renderLayouts(); renderThumbs(); updateExport(); redraw(); });
+      btn.addEventListener('click', () => { setLayout(btn.dataset.layout); renderLayouts(); renderSlots(); renderThumbs(); updateExport(); redraw(); });
     });
   }
 
   function renderSlots() {
     const theme = currentTheme();
-    $('[data-slots]').innerHTML = theme.slots.map(s => `
+    $('[data-slots]').innerHTML = slotsFor(theme, currentLayout()).map(s => `
       <label class="field pt-field"><span>${s.label}</span>
         <input type="text" data-slot="${s.id}" value="${esc(slotText(s))}" maxlength="${s.style === 'numeral' ? 6 : 80}" placeholder="${esc(s.default)}">
       </label>`).join('');
@@ -698,8 +953,8 @@ export function viewCollage(app) {
       el.appendChild(rm);
       el.addEventListener('click', () => {
         let idx = state.ui.selected;
-        if (idx === null) idx = state.cells.findIndex(c => !c.photoId);
-        if (idx < 0 || idx === null) idx = 0;
+        if (idx === null || !isPhotoCell(idx)) idx = firstEmptyPhotoCell();
+        if (idx < 0) idx = photoCellIndices()[0];
         assignPhoto(idx, p.id);
         state.ui.selected = idx;
         afterChange();
@@ -738,6 +993,7 @@ export function viewCollage(app) {
     const g = geometry(cssW, cssH);
     for (let i = g.cells.length - 1; i >= 0; i--) {
       const cell = g.cells[i];
+      if (cell.type !== 'photo') continue;
       const dx = x - cell.center.x, dy = y - cell.center.y;
       const cos = Math.cos(-cell.rot), sin = Math.sin(-cell.rot);
       const lx = dx * cos - dy * sin, ly = dx * sin + dy * cos;
@@ -831,8 +1087,8 @@ export function viewCollage(app) {
     switch (act) {
       case 'zoom-in': c.zoom = Math.min(4, c.zoom * 1.15); break;
       case 'zoom-out': c.zoom = Math.max(1, c.zoom / 1.15); break;
-      case 'up': if (i > 0) { swapCells(i, i - 1); state.ui.selected = i - 1; } break;
-      case 'down': if (i < state.cells.length - 1) { swapCells(i, i + 1); state.ui.selected = i + 1; } break;
+      case 'up': { const ps = photoCellIndices(), k = ps.indexOf(i); if (k > 0) { swapCells(i, ps[k - 1]); state.ui.selected = ps[k - 1]; } break; }
+      case 'down': { const ps = photoCellIndices(), k = ps.indexOf(i); if (k < ps.length - 1) { swapCells(i, ps[k + 1]); state.ui.selected = ps[k + 1]; } break; }
       case 'swap': state.ui.swapFrom = i; $('[data-hint]').textContent = 'Swap mode — click the cell to swap with (click the same cell to cancel).'; break;
       case 'replace': fileTarget = i; fileInput.click(); break;
       case 'clear': clearCell(i); break;
