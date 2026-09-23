@@ -29,7 +29,7 @@ const state = {
   texts: {},                  // slotId -> user text (absent = theme default)
   textOv: {},                 // slotId -> { dx, dy, scale, hidden } — moved / resized / removed words
   undo: null,                 // single-level snapshot of cells
-  ui: { selected: null, selectedText: null, swapFrom: null, hideText: false, preset: 'web', format: 'jpeg', lastExport: null },
+  ui: { selected: null, selectedText: null, swapFrom: null, hideText: true, preset: 'web', format: 'jpeg', lastExport: null },   // photos only by default; words are opt-in
 };
 state.cells = currentLayout().cells.map(emptyCell);
 
@@ -847,7 +847,7 @@ export function viewCollage(app) {
 
         <section class="pt-step">
           <div class="pt-step-title"><span class="mono">05 · Words</span><button class="chip ${state.ui.hideText ? 'on' : ''}" data-hide-all>${state.ui.hideText ? 'show words' : 'photos only'}</button></div>
-          <p class="pt-note">Drag any words on the canvas to move them; click them for size, reset and remove.</p>
+          <p class="pt-note">Words are off by default. Turn them on to add a title, caption or number — then drag them on the canvas to move, click for size, reset and remove.</p>
           <div data-slots></div>
         </section>
       </aside>
