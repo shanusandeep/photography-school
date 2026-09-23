@@ -1,6 +1,7 @@
 import { MODULES, getModule, getLesson, TOTAL_ITEMS, FIELD_NOTES, PHOTO_CREDITS } from './data/index.js';
 import { mountWidget } from './widgets.js';
 import { initAuth, onAuth, getUser, api, openAuthModal } from './auth.js';
+import { viewCollage } from './collage.js';
 
 const app = document.getElementById('app');
 
@@ -193,6 +194,15 @@ function viewHome() {
           </div>
         </a>`;
       }).join('')}
+    </section>
+
+    <section class="pt-promo">
+      <div>
+        <span class="mono" style="color:var(--amber)">NEW · MEMBERS' TOOL</span>
+        <h3>The Print Table — themed collages, print-ready</h3>
+        <p>Newborn, birthday, graduation, wedding, maternity or classic darkroom: pick a theme and a layout, drop in your photos, add the words, and download a 300-DPI file. Everything stays on your device.</p>
+      </div>
+      <a class="btn btn-primary" href="#/collage">Open the Print Table</a>
     </section>
   </div>`;
 
@@ -433,7 +443,7 @@ function viewGate() {
 }
 
 /* ---------------- router ---------------- */
-const GATED = new Set(['module', 'lesson', 'quiz']);
+const GATED = new Set(['module', 'lesson', 'quiz', 'collage']);
 
 function route() {
   const hash = location.hash.slice(2) || '';
@@ -448,6 +458,7 @@ function route() {
   if (parts[0] === 'quiz' && parts[1]) return viewQuiz(parts[1]);
   if (parts[0] === 'syllabus') return viewSyllabus();
   if (parts[0] === 'fieldnotes') return viewFieldNotes();
+  if (parts[0] === 'collage') { setNav('collage'); return viewCollage(app); }
   return viewHome();
 }
 

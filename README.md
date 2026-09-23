@@ -36,6 +36,8 @@ in guest mode (localStorage only).
 | `js/data/curriculum-b.js` | Modules 06–10 (Lenses & Gear, Genres, Editing, Advanced, Craft) |
 | `js/data/index.js` | Data index + Field Notes cards |
 | `js/auth.js` | Sign-in modal, session state, Google SSO button |
+| `js/collage.js` | The Print Table — themed collage studio: shared canvas renderer (preview = export), pointer editing, high-res export with memory fallback |
+| `js/data/collage.js` | Collage data: canvas shapes + export presets, 10 layouts, 6 theme packs (fonts, palettes, text slots, ornaments) |
 | `server/server.mjs` | Accounts & progress API — zero-dep Node, SQLite, scrypt passwords, HMAC session cookies, Google ID-token verification |
 
 ## Notes
