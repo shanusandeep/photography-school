@@ -37,7 +37,7 @@ in guest mode (localStorage only).
 | `js/data/index.js` | Data index + Field Notes cards |
 | `js/auth.js` | Sign-in modal, session state, Google SSO button |
 | `js/collage.js` | The Print Table — themed collage studio: shared canvas renderer (preview = export), pointer editing, high-res export with memory fallback |
-| `js/data/collage.js` | Collage data: canvas shapes + export presets, 21 layouts (10 classic + 11 moodboard-style with text cells, swatch panels, tape, torn strips), 6 theme packs (fonts, palettes, text slots, ornaments) |
+| `js/data/collage.js` | Collage data: canvas shapes + export presets, 37 layouts (17 moodboard, 10 photos-only, 10 classic), 6 theme packs, 12 palettes, 9 font sets, 8 combinations |
 | `server/server.mjs` | Accounts & progress API — zero-dep Node, SQLite, scrypt passwords, HMAC session cookies, Google ID-token verification |
 
 ## Notes

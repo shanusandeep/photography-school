@@ -27,8 +27,9 @@ const state = {
   photos: [],                 // { id, file, name, iw, ih, bmp }
   cells: [],                  // one per layout cell
   texts: {},                  // slotId -> user text (absent = theme default)
+  textOv: {},                 // slotId -> { dx, dy, scale, hidden } — moved / resized / removed words
   undo: null,                 // single-level snapshot of cells
-  ui: { selected: null, swapFrom: null, preset: 'web', format: 'jpeg', lastExport: null },
+  ui: { selected: null, selectedText: null, swapFrom: null, hideText: false, preset: 'web', format: 'jpeg', lastExport: null },
 };
 state.cells = currentLayout().cells.map(emptyCell);
 
@@ -52,6 +53,10 @@ const styledTheme = () => applyStyle(currentTheme());
 function accentColor() { return state.accent || styledTheme().palette.accent; }
 function hasContent() { return state.photos.length > 0 || Object.keys(state.texts).length > 0; }
 function slotText(slot) { return state.texts[slot.id] !== undefined ? state.texts[slot.id] : slot.default; }
+const NO_OV = { dx: 0, dy: 0, scale: 1, hidden: false };
+const textOv = (id) => state.textOv[id] || NO_OV;
+function setTextOv(id, patch) { state.textOv[id] = { ...textOv(id), ...patch }; }
+const textVisible = (id) => !state.ui.hideText && !textOv(id).hidden;
 
 window.addEventListener('beforeunload', (e) => {
   if (hasContent()) { e.preventDefault(); e.returnValue = ''; }
@@ -116,7 +121,7 @@ function geometry(W, H, opts = {}) {
   const layout = opts.layout || currentLayout();
   const u = Math.min(W, H);
   const m = theme.margin * u;
-  const noBand = layout.band === false;
+  const noBand = layout.band === false || state.ui.hideText;
   const bandH = noBand ? 0 : theme.band.h * H;
   const top = theme.band.pos === 'top';
   const content = noBand ? { x: m, y: m, w: W - 2 * m, h: H - 2 * m } : { x: m, y: top ? bandH : m, w: W - 2 * m, h: H - bandH - m };
@@ -141,7 +146,29 @@ function geometry(W, H, opts = {}) {
              rot: (c.rot || 0) * Math.PI / 180, inset: !!c.inset, frame: !!c.frame, tape: !!c.tape, radius: (c.radius || 0) * u };
   });
   const decor = (layout.decor || []).map(d => ({ x: content.x + d.x * content.w, y: content.y + d.y * content.h, r: d.r * u }));
-  return { W, H, u, theme, layout, content, band, cells, decor, textSlots: resolveTextSlots(theme, layout) };
+  return { W, H, u, theme, layout, content, band, cells, decor, textSlots: resolveTextSlots(theme, layout), textBoxes: {} };
+}
+
+// draw one line of text as a movable / resizable / removable item; records its box for hit-testing
+function drawLine(ctx, g, id, text, x, y, size, kind, o = {}) {
+  if (!text || !textVisible(id)) return null;
+  const ov = textOv(id);
+  size *= ov.scale;
+  ctx.save();
+  ctx.translate(ov.dx * g.W, ov.dy * g.H);
+  ctx.font = o.italic ? `italic 400 ${size}px "${(g.theme.body || DEFAULT_BODY).family}", sans-serif` : fontStr(g.theme, size, kind);
+  if (o.tracking) setTracking(ctx, o.tracking * size);
+  if (o.shadow) { ctx.shadowColor = 'rgba(0,0,0,.55)'; ctx.shadowBlur = g.u * 0.012; }
+  ctx.textAlign = o.align || 'center'; ctx.textBaseline = 'alphabetic';
+  ctx.fillStyle = o.color || g.theme.palette.text; ctx.globalAlpha = o.alpha ?? 1;
+  ctx.fillText(text, x, y);
+  const w = ctx.measureText(text).width;
+  if (o.tracking) setTracking(ctx, 0);
+  ctx.restore();
+  const bx = (o.align || 'center') === 'center' ? x - w / 2 : o.align === 'right' ? x - w : x;
+  const box = { x: bx + ov.dx * g.W, y: y - size * 0.82 + ov.dy * g.H, w, h: size * 1.05 };
+  g.textBoxes[id] = box;
+  return box;
 }
 
 const isPhotoCell = (i, layout = currentLayout()) => (layout.cells[i].type || 'photo') === 'photo';
@@ -338,53 +365,56 @@ function drawTextCell(ctx, g, i) {
     if (def.torn) { tornStripPath(ctx, r, u); ctx.fill(); } else ctx.fillRect(r.x, r.y, r.w, r.h);
     ctx.restore(); ink = inkOn(theme.palette.mat);
   }
-  if (!vals.length) { ctx.restore(); return; }
+  ctx.restore();
+  if (!vals.length) return;
   const align = def.align || 'center';
   const padX = r.w * 0.07;
   const ax = align === 'left' ? r.x + padX : r.x + r.w / 2;
-  ctx.textAlign = align; ctx.textBaseline = 'alphabetic'; ctx.fillStyle = ink;
   const maxW = r.w - 2 * padX;
+  const ids = slots.map(s => s.id);
 
   switch (def.style) {
     case 'title': {
       const [a, b] = vals;
       const size = fitFont(ctx, a, theme, Math.min(r.h * (b ? 0.34 : 0.4), r.w * 0.16), 'display', maxW);
-      ctx.fillText(a, ax, r.y + r.h * (b ? 0.5 : 0.6));
+      drawLine(ctx, g, ids[0], a, ax, r.y + r.h * (b ? 0.5 : 0.6), size, 'display', { align, color: ink });
       if (b) {
-        const s2 = fitFont(ctx, b.toUpperCase(), theme, Math.min(r.h * 0.11, size * 0.4), 'body', maxW);
-        setTracking(ctx, s2 * 0.28);
-        fitFont(ctx, b.toUpperCase(), theme, s2, 'body', maxW);
-        ctx.globalAlpha = 0.85; ctx.fillText(b.toUpperCase(), ax, r.y + r.h * 0.72);
-        setTracking(ctx, 0);
+        const up = b.toUpperCase();
+        const s2 = fitFont(ctx, up, theme, Math.min(r.h * 0.11, size * 0.4), 'body', maxW / 1.3);
+        drawLine(ctx, g, ids[1], up, ax, r.y + r.h * 0.72, s2, 'body', { align, color: ink, alpha: 0.85, tracking: 0.28 });
       }
       break;
     }
     case 'quote': {
-      const size = Math.min(r.h * 0.1, r.w * 0.085);
+      if (!textVisible(ids[0])) break;
+      const ov = textOv(ids[0]);
+      const size = Math.min(r.h * 0.1, r.w * 0.085) * ov.scale;
+      ctx.save();
+      ctx.translate(ov.dx * g.W, ov.dy * g.H);
       ctx.font = `italic 400 ${size}px "${(theme.body || DEFAULT_BODY).family}", sans-serif`;
+      ctx.textAlign = align; ctx.textBaseline = 'alphabetic'; ctx.fillStyle = ink;
       const lines = wrapLines(ctx, vals[0], maxW).slice(0, 6);
       const lh = size * 1.35, y0 = r.y + r.h / 2 - (lines.length - 1) * lh / 2 + size * 0.35;
-      lines.forEach((ln, k) => ctx.fillText(ln, ax, y0 + k * lh));
+      let wMax = 0;
+      lines.forEach((ln, k) => { ctx.fillText(ln, ax, y0 + k * lh); wMax = Math.max(wMax, ctx.measureText(ln).width); });
+      ctx.restore();
+      const bx = align === 'left' ? ax : ax - wMax / 2;
+      g.textBoxes[ids[0]] = { x: bx + ov.dx * g.W, y: y0 - size * 0.85 + ov.dy * g.H, w: wMax, h: (lines.length - 1) * lh + size * 1.1 };
       break;
     }
     case 'big': {
       const size = fitFont(ctx, vals[0], theme, r.h * 0.82, 'display', r.w * 0.9);
-      ctx.fillText(vals[0], ax, r.y + r.h / 2 + size * 0.36);
+      drawLine(ctx, g, ids[0], vals[0], ax, r.y + r.h / 2 + size * 0.36, size, 'display', { align, color: ink });
       break;
     }
     case 'label': {
       const t = vals[0].toUpperCase();
-      ctx.fillStyle = def.bg === 'none' ? theme.palette.mat : ink;
-      if (def.bg === 'none') { ctx.shadowColor = 'rgba(0,0,0,.55)'; ctx.shadowBlur = u * 0.012; }
-      let size = Math.min(r.h * 0.6, u * 0.04);
-      setTracking(ctx, size * 0.3);
-      size = fitFont(ctx, t, theme, size, 'body', maxW);
-      ctx.fillText(t, ax, r.y + r.h / 2 + size * 0.36);
-      setTracking(ctx, 0);
+      const size = fitFont(ctx, t, theme, Math.min(r.h * 0.6, u * 0.04), 'body', maxW / 1.3);
+      drawLine(ctx, g, ids[0], t, ax, r.y + r.h / 2 + size * 0.36, size, 'body',
+        { align, tracking: 0.3, color: def.bg === 'none' ? theme.palette.mat : ink, shadow: def.bg === 'none' });
       break;
     }
   }
-  ctx.restore();
 }
 
 function drawSwatchCell(ctx, g, i) {
@@ -428,9 +458,11 @@ function drawCaption(ctx, g, cell) {
   const theme = g.theme, u = g.u, p = cell.photo;
   const slot = slotsFor(theme, g.layout).find(s => s.id === cell.def.caption);
   const text = slot ? slotText(slot).trim() : '';
-  if (!text) return;
-  const size = Math.max(9, u * 0.026);
+  if (!text || !textVisible(slot.id)) return;
+  const ov = textOv(slot.id);
+  const size = Math.max(9, u * 0.026) * ov.scale;
   ctx.save();
+  ctx.translate(ov.dx * g.W, ov.dy * g.H);
   ctx.font = `400 ${size}px "${(theme.body || DEFAULT_BODY).family}", sans-serif`;
   setTracking(ctx, size * 0.32);
   const tw = ctx.measureText(text).width, padX = size * 1.2, h = size * 2.1;
@@ -442,6 +474,7 @@ function drawCaption(ctx, g, cell) {
   ctx.fillText(text, x + padX, y + h / 2 + size * 0.05);
   setTracking(ctx, 0);
   ctx.restore();
+  g.textBoxes[slot.id] = { x: x + ov.dx * g.W, y: y + ov.dy * g.H, w: tw + 2 * padX, h };
 }
 
 function drawTape(ctx, g, cell) {
@@ -589,30 +622,24 @@ function fitFont(ctx, text, theme, size, kind, maxW) {
 
 function drawTextBand(ctx, g) {
   const { theme, band } = g;
-  const slots = Object.fromEntries(theme.slots.map(s => [s.style, slotText(s).trim()]));
+  const byStyle = Object.fromEntries(theme.slots.map(s => [s.style, s]));
+  const val = (s) => (s && textVisible(s.id)) ? slotText(s).trim() : '';
+  const numeral = val(byStyle.numeral), headline = val(byStyle.headline), subline = val(byStyle.subline);
   const padX = band.w * 0.03;
-  ctx.save();
-  ctx.textBaseline = 'alphabetic';
-  ctx.fillStyle = theme.palette.text;
 
-  if (slots.numeral) {
-    ctx.textAlign = 'left';
-    const nSize = fitFont(ctx, slots.numeral, theme, band.h * 0.8, 'display', band.w * 0.4);
-    const nw = ctx.measureText(slots.numeral).width;
-    ctx.fillStyle = accentColor();
-    ctx.fillText(slots.numeral, band.x + padX, band.y + band.h * 0.5 + nSize * 0.36);
+  if (numeral) {
+    const nSize = fitFont(ctx, numeral, theme, band.h * 0.8, 'display', band.w * 0.4);
+    const nw = ctx.measureText(numeral).width;
+    drawLine(ctx, g, byStyle.numeral.id, numeral, band.x + padX, band.y + band.h * 0.5 + nSize * 0.36, nSize, 'display', { align: 'left', color: accentColor() });
     const tx = band.x + padX + nw + band.h * 0.22;
     const avail = band.x + band.w - padX - tx;
-    ctx.fillStyle = theme.palette.text;
-    if (slots.headline) { fitFont(ctx, slots.headline, theme, band.h * 0.3, 'display', avail); ctx.fillText(slots.headline, tx, band.y + band.h * 0.5); }
-    if (slots.subline) { fitFont(ctx, slots.subline, theme, band.h * 0.13, 'body', avail); ctx.globalAlpha = 0.8; ctx.fillText(slots.subline, tx, band.y + band.h * 0.73); }
+    if (headline) drawLine(ctx, g, byStyle.headline.id, headline, tx, band.y + band.h * 0.5, fitFont(ctx, headline, theme, band.h * 0.3, 'display', avail), 'display', { align: 'left' });
+    if (subline) drawLine(ctx, g, byStyle.subline.id, subline, tx, band.y + band.h * 0.73, fitFont(ctx, subline, theme, band.h * 0.13, 'body', avail), 'body', { align: 'left', alpha: 0.8 });
   } else {
-    ctx.textAlign = 'center';
     const cx = band.x + band.w / 2, avail = band.w - 2 * padX;
-    if (slots.headline) { fitFont(ctx, slots.headline, theme, band.h * 0.4, 'display', avail); ctx.fillText(slots.headline, cx, band.y + band.h * 0.55); }
-    if (slots.subline) { fitFont(ctx, slots.subline, theme, band.h * 0.14, 'body', avail); ctx.globalAlpha = 0.8; ctx.fillText(slots.subline, cx, band.y + band.h * 0.82); }
+    if (headline) drawLine(ctx, g, byStyle.headline.id, headline, cx, band.y + band.h * 0.55, fitFont(ctx, headline, theme, band.h * 0.4, 'display', avail), 'display');
+    if (subline) drawLine(ctx, g, byStyle.subline.id, subline, cx, band.y + band.h * 0.82, fitFont(ctx, subline, theme, band.h * 0.14, 'body', avail), 'body', { alpha: 0.8 });
   }
-  ctx.restore();
 }
 
 /* ============================================================
@@ -819,7 +846,8 @@ export function viewCollage(app) {
         </section>
 
         <section class="pt-step">
-          <div class="pt-step-title"><span class="mono">05 · Words</span></div>
+          <div class="pt-step-title"><span class="mono">05 · Words</span><button class="chip ${state.ui.hideText ? 'on' : ''}" data-hide-all>${state.ui.hideText ? 'show words' : 'photos only'}</button></div>
+          <p class="pt-note">Drag any words on the canvas to move them; click them for size, reset and remove.</p>
           <div data-slots></div>
         </section>
       </aside>
@@ -838,6 +866,13 @@ export function viewCollage(app) {
               <span class="pt-sep"></span>
               <button data-act="replace" title="Replace photo">Replace</button>
               <button data-act="clear" title="Clear cell">✕</button>
+            </div>
+            <div class="pt-toolbar" data-text-toolbar hidden>
+              <button data-tact="smaller" title="Smaller text">A−</button>
+              <button data-tact="bigger" title="Bigger text">A+</button>
+              <span class="pt-sep"></span>
+              <button data-tact="reset" title="Reset position & size">↺ Reset</button>
+              <button data-tact="hide" title="Remove this text">✕ Remove</button>
             </div>
           </div>
           <p class="pt-hint" data-hint>Click an empty cell to add photos · drag a photo to reposition · scroll or pinch to zoom · click a photo for more controls</p>
@@ -922,6 +957,15 @@ export function viewCollage(app) {
       ctx.restore();
     });
 
+    lastG = g;
+    // selected text item
+    const tb = state.ui.selectedText && g.textBoxes[state.ui.selectedText];
+    if (tb) {
+      ctx.save(); ctx.strokeStyle = '#e8a33d'; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]);
+      ctx.strokeRect(tb.x - 6, tb.y - 4, tb.w + 12, tb.h + 8); ctx.restore();
+    }
+    positionTextToolbar(g);
+
     // selection / swap highlight
     const hi = state.ui.swapFrom ?? state.ui.selected;
     if (hi !== null && g.cells[hi]) {
@@ -935,6 +979,35 @@ export function viewCollage(app) {
     positionToolbar(g);
   }
   const redraw = () => { if (!raf) raf = requestAnimationFrame(draw); };
+
+  let lastG = null;
+  const textToolbar = $('[data-text-toolbar]');
+  function positionTextToolbar(g) {
+    const id = state.ui.selectedText, b = id && g.textBoxes[id];
+    if (!b) { textToolbar.hidden = true; return; }
+    textToolbar.hidden = false;
+    textToolbar.style.left = `${Math.max(120, Math.min(cssW - 120, b.x + b.w / 2))}px`;
+    textToolbar.style.top = `${Math.min(cssH - 44, b.y + b.h + 10)}px`;
+  }
+  function hitText(x, y) {
+    if (!lastG) return null;
+    const ids = Object.keys(lastG.textBoxes).reverse();
+    for (const id of ids) {
+      const b = lastG.textBoxes[id];
+      if (x >= b.x - 6 && x <= b.x + b.w + 6 && y >= b.y - 4 && y <= b.y + b.h + 4) return id;
+    }
+    return null;
+  }
+  textToolbar.addEventListener('click', (e) => {
+    const act = e.target.closest('[data-tact]')?.dataset.tact, id = state.ui.selectedText;
+    if (!act || !id) return;
+    const ov = textOv(id);
+    if (act === 'bigger') setTextOv(id, { scale: Math.min(3, ov.scale * 1.12) });
+    else if (act === 'smaller') setTextOv(id, { scale: Math.max(0.4, ov.scale / 1.12) });
+    else if (act === 'reset') delete state.textOv[id];
+    else if (act === 'hide') { setTextOv(id, { hidden: true }); state.ui.selectedText = null; }
+    renderSlots(); redraw();
+  });
 
   function positionToolbar(g) {
     const i = state.ui.selected;
@@ -1014,7 +1087,8 @@ export function viewCollage(app) {
       </button>`;
     box.innerHTML =
       `<div class="pt-group mono">Moodboard</div>${LAYOUTS.filter(l => l.group === 'moodboard').map(btn).join('')}` +
-      `<div class="pt-group mono">Classic</div>${LAYOUTS.filter(l => l.group !== 'moodboard').map(btn).join('')}`;
+      `<div class="pt-group mono">Photos only</div>${LAYOUTS.filter(l => l.group === 'photos').map(btn).join('')}` +
+      `<div class="pt-group mono">Classic</div>${LAYOUTS.filter(l => !l.group).map(btn).join('')}`;
     box.querySelectorAll('[data-layout]').forEach(btn => {
       const c = btn.querySelector('canvas'), cx = c.getContext('2d');
       const layout = LAYOUTS.find(l => l.id === btn.dataset.layout);
@@ -1037,15 +1111,38 @@ export function viewCollage(app) {
 
   function renderSlots() {
     const theme = currentTheme();
-    $('[data-slots]').innerHTML = slotsFor(theme, currentLayout()).map(s => `
-      <label class="field pt-field"><span>${s.label}</span>
-        <input type="text" data-slot="${s.id}" value="${esc(slotText(s))}" maxlength="${s.style === 'numeral' ? 6 : 80}" placeholder="${esc(s.default)}">
-      </label>`).join('');
+    $('[data-slots]').innerHTML = slotsFor(theme, currentLayout()).map(s => {
+      const ov = textOv(s.id), changed = ov.dx || ov.dy || ov.scale !== 1;
+      return `
+      <div class="pt-slot ${ov.hidden ? 'off' : ''}">
+        <label class="field pt-field"><span>${s.label}</span>
+          <input type="text" data-slot="${s.id}" value="${esc(slotText(s))}" maxlength="${s.style === 'numeral' ? 6 : 80}" placeholder="${esc(s.default)}">
+        </label>
+        <div class="pt-slot-actions">
+          <button class="chip ${ov.hidden ? '' : 'on'}" data-slot-toggle="${s.id}" title="${ov.hidden ? 'Show' : 'Hide'} this text">${ov.hidden ? 'show' : 'on'}</button>
+          <button class="chip" data-slot-reset="${s.id}" title="Reset position & size" ${changed ? '' : 'disabled'}>↺</button>
+        </div>
+      </div>`;
+    }).join('');
     $('[data-slots]').querySelectorAll('[data-slot]').forEach(inp => inp.addEventListener('input', () => {
       state.texts[inp.dataset.slot] = inp.value;
       redraw();
     }));
   }
+  $('[data-slots]').addEventListener('click', (e) => {
+    const t = e.target.closest('[data-slot-toggle]'), r = e.target.closest('[data-slot-reset]');
+    if (t) { setTextOv(t.dataset.slotToggle, { hidden: !textOv(t.dataset.slotToggle).hidden }); if (state.ui.selectedText === t.dataset.slotToggle) state.ui.selectedText = null; }
+    else if (r) { delete state.textOv[r.dataset.slotReset]; }
+    else return;
+    renderSlots(); redraw();
+  });
+  $('[data-hide-all]').addEventListener('click', (e) => {
+    state.ui.hideText = !state.ui.hideText;
+    state.ui.selectedText = null;
+    e.currentTarget.textContent = state.ui.hideText ? 'show words' : 'photos only';
+    e.currentTarget.classList.toggle('on', state.ui.hideText);
+    renderLayouts(); afterChange();
+  });
 
   function renderThumbs() {
     renderStyles();                       // image palettes follow the photo tray
@@ -1120,6 +1217,7 @@ export function viewCollage(app) {
   const pointers = new Map();
   let drag = null;   // { i, startX, startY, panX, panY, moved, overX, overY, rot }
   let pinch = null;  // { i, dist, zoom }
+  let textDrag = null; // { id, startX, startY, dx0, dy0 }
   // canvas-local coordinates from client coords (offsetX is unreliable under transforms / off-screen)
   const pos = (e) => { const b = canvas.getBoundingClientRect(); return { x: e.clientX - b.left, y: e.clientY - b.top }; };
 
@@ -1133,6 +1231,14 @@ export function viewCollage(app) {
       drag = null;
       return;
     }
+    // words sit on top of everything, so test them first
+    const tid = state.ui.swapFrom === null ? hitText(pt.x, pt.y) : null;
+    if (tid) {
+      state.ui.selectedText = tid; state.ui.selected = null;
+      textDrag = { id: tid, startX: pt.x, startY: pt.y, dx0: textOv(tid).dx, dy0: textOv(tid).dy };
+      redraw(); return;
+    }
+    state.ui.selectedText = null;
     const i = hitTest(pt.x, pt.y);
     if (i < 0) { state.ui.selected = null; state.ui.swapFrom = null; redraw(); return; }
     if (state.ui.swapFrom !== null) {
@@ -1163,6 +1269,10 @@ export function viewCollage(app) {
       state.cells[pinch.i].zoom = Math.min(4, Math.max(1, pinch.zoom * d / pinch.dist));
       redraw(); return;
     }
+    if (textDrag) {
+      setTextOv(textDrag.id, { dx: textDrag.dx0 + (pt.x - textDrag.startX) / cssW, dy: textDrag.dy0 + (pt.y - textDrag.startY) / cssH });
+      redraw(); return;
+    }
     if (!drag) return;
     const dx = pt.x - drag.startX, dy = pt.y - drag.startY;
     if (Math.hypot(dx, dy) > 3) drag.moved = true;
@@ -1176,6 +1286,7 @@ export function viewCollage(app) {
 
   const endPointer = (e) => {
     pointers.delete(e.pointerId);
+    if (textDrag) { textDrag = null; renderSlots(); }
     if (pinch && pointers.size < 2) { pinch = null; updateExport(); }
     if (drag) { drag = null; updateExport(); }
   };
@@ -1275,7 +1386,7 @@ export function viewCollage(app) {
   });
 
   /* ---------- boot ---------- */
-  const ro = new ResizeObserver(() => { sizeCanvas(); redraw(); });
+  const ro = new ResizeObserver(() => requestAnimationFrame(() => { sizeCanvas(); redraw(); }));
   ro.observe(stage);
   window.addEventListener('resize', sizeWorkspace);
   sizeWorkspace();

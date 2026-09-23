@@ -546,6 +546,13 @@ main.pt-full .view { animation: none; }
 .pt-layout-btn canvas { max-width: 100%; height: auto; border-radius: 2px; }
 .pt-layout-btn:hover { border-color: var(--amber); color: var(--paper); }
 .pt-layout-btn.on { border-color: var(--amber); box-shadow: 0 0 0 1px var(--amber); color: var(--amber); }
+.pt-note { font-size: .74rem; color: var(--paper-faint); font-style: italic; margin: -.2rem 0 .7rem; }
+.pt-slot { display: flex; gap: .4rem; align-items: flex-end; margin-bottom: .6rem; }
+.pt-slot .pt-field { flex: 1; margin: 0; min-width: 0; }
+.pt-slot-actions { display: flex; gap: .25rem; padding-bottom: .2rem; }
+.pt-slot-actions .chip { padding: .38rem .55rem; }
+.pt-slot-actions .chip[disabled] { opacity: .35; cursor: default; }
+.pt-slot.off input { opacity: .45; text-decoration: line-through; }
 .pt-field { display: block; margin-bottom: .7rem; }
 .pt-field > span { display: block; font-family: var(--font-mono); font-size: .6rem; letter-spacing: .16em; text-transform: uppercase; color: var(--paper-dim); margin-bottom: .3rem; }
 
