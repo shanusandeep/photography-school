@@ -451,6 +451,11 @@ function route() {
   window.scrollTo({ top: 0 });
   updateTopbar();
 
+  // the Print Table is a full-page workspace (no content column, no footer)
+  const workspace = parts[0] === 'collage' && !!getUser();
+  app.classList.toggle('pt-full', workspace);
+  document.body.classList.toggle('pt-mode', workspace);
+
   if (GATED.has(parts[0]) && !getUser()) return viewGate();
 
   if (parts[0] === 'module' && parts[1]) return viewModule(parts[1]);

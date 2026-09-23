@@ -780,17 +780,12 @@ export function viewCollage(app) {
 
   app.innerHTML = `
   <div class="view pt">
-    <div class="crumbs"><a href="#/">Studio</a> / <span>The Print Table</span></div>
-    <div class="pt-head">
-      <div>
-        <span class="mono" style="color:var(--amber)">COLLAGE STUDIO</span>
-        <h1>The Print Table</h1>
-        <p>Pick a theme, choose a shape, lay out your photos, add the words — then download a print-quality file. Your photos never leave this device.</p>
-      </div>
-    </div>
-
-    <div class="pt-layout">
+    <div class="pt-layout" data-layout-root>
       <aside class="pt-side">
+        <div class="pt-side-head">
+          <span class="mono" style="color:var(--amber)">The Print Table</span>
+          <span class="mono" style="color:var(--paper-faint)">photos stay on this device</span>
+        </div>
         <section class="pt-step">
           <div class="pt-step-title"><span class="mono">01 · Theme</span></div>
           <div class="pt-chips" data-themes>
@@ -830,42 +825,45 @@ export function viewCollage(app) {
       </aside>
 
       <main class="pt-main">
-        <div class="pt-canvas-wrap" data-wrap>
-          <canvas data-preview aria-label="Collage preview"></canvas>
-          <div class="pt-toolbar" data-toolbar hidden>
-            <button data-act="zoom-out" title="Zoom out">−</button>
-            <button data-act="zoom-in" title="Zoom in">+</button>
-            <span class="pt-sep"></span>
-            <button data-act="up" title="Move to previous cell">↑</button>
-            <button data-act="down" title="Move to next cell">↓</button>
-            <button data-act="swap" title="Swap with another cell">⇄ Swap</button>
-            <span class="pt-sep"></span>
-            <button data-act="replace" title="Replace photo">Replace</button>
-            <button data-act="clear" title="Clear cell">✕</button>
+        <div class="pt-stage" data-stage>
+          <div class="pt-canvas-wrap" data-wrap>
+            <canvas data-preview aria-label="Collage preview"></canvas>
+            <div class="pt-toolbar" data-toolbar hidden>
+              <button data-act="zoom-out" title="Zoom out">−</button>
+              <button data-act="zoom-in" title="Zoom in">+</button>
+              <span class="pt-sep"></span>
+              <button data-act="up" title="Move to previous cell">↑</button>
+              <button data-act="down" title="Move to next cell">↓</button>
+              <button data-act="swap" title="Swap with another cell">⇄ Swap</button>
+              <span class="pt-sep"></span>
+              <button data-act="replace" title="Replace photo">Replace</button>
+              <button data-act="clear" title="Clear cell">✕</button>
+            </div>
           </div>
-        </div>
-        <p class="pt-hint" data-hint>Click an empty cell to add photos · drag a photo to reposition · scroll or pinch to zoom · click a photo for more controls</p>
-
-        <div class="pt-tray">
-          <button class="btn btn-primary btn-small" data-add>+ Add photos</button>
-          <div class="pt-thumbs" data-thumbs></div>
-          <input type="file" accept="image/*" multiple hidden data-file>
+          <p class="pt-hint" data-hint>Click an empty cell to add photos · drag a photo to reposition · scroll or pinch to zoom · click a photo for more controls</p>
         </div>
 
-        <div class="pt-export">
-          <div class="pt-export-row">
-            <label><span class="mono">Size</span><select data-preset></select></label>
-            <label><span class="mono">Format</span><select data-format>
-              <option value="jpeg" ${state.ui.format === 'jpeg' ? 'selected' : ''}>JPEG (smaller)</option>
-              <option value="png" ${state.ui.format === 'png' ? 'selected' : ''}>PNG (lossless)</option>
-            </select></label>
-            <button class="btn btn-primary" data-download>Download</button>
-            <button class="btn btn-ghost btn-small" data-undo disabled>↺ Undo</button>
-            <button class="btn btn-ghost btn-small" data-new>New collage</button>
+        <div class="pt-bottom">
+          <div class="pt-tray">
+            <button class="btn btn-primary btn-small" data-add>+ Add photos</button>
+            <div class="pt-thumbs" data-thumbs></div>
+            <input type="file" accept="image/*" multiple hidden data-file>
           </div>
-          <p class="pt-export-info" data-export-info></p>
-          <p class="pt-export-warn" data-export-warn hidden></p>
-          <p class="pt-export-done" data-export-done hidden></p>
+          <div class="pt-export">
+            <div class="pt-export-row">
+              <label><span class="mono">Size</span><select data-preset></select></label>
+              <label><span class="mono">Format</span><select data-format>
+                <option value="jpeg" ${state.ui.format === 'jpeg' ? 'selected' : ''}>JPEG (smaller)</option>
+                <option value="png" ${state.ui.format === 'png' ? 'selected' : ''}>PNG (lossless)</option>
+              </select></label>
+              <button class="btn btn-primary" data-download>Download</button>
+              <button class="btn btn-ghost btn-small" data-undo disabled>↺ Undo</button>
+              <button class="btn btn-ghost btn-small" data-new>New collage</button>
+            </div>
+            <p class="pt-export-info" data-export-info></p>
+            <p class="pt-export-warn" data-export-warn hidden></p>
+            <p class="pt-export-done" data-export-done hidden></p>
+          </div>
         </div>
       </main>
     </div>
@@ -880,9 +878,21 @@ export function viewCollage(app) {
   let raf = 0;
 
   /* ---------- preview rendering ---------- */
+  const stage = $('[data-stage]');
+  const layoutRoot = $('[data-layout-root]');
+  // full-page workspace: the layout grid fills the viewport under the top bar (desktop only)
+  function sizeWorkspace() {
+    const desktop = window.matchMedia('(min-width: 901px)').matches;
+    const topbar = document.querySelector('.topbar');
+    layoutRoot.style.height = desktop ? `${window.innerHeight - (topbar ? topbar.offsetHeight : 0)}px` : '';
+  }
   function sizeCanvas() {
     const ar = currentShape().ar;
-    cssW = Math.max(200, wrap.clientWidth);
+    const pad = 28, hintRoom = 34;
+    const availW = Math.max(200, stage.clientWidth - pad * 2);
+    const desktop = window.matchMedia('(min-width: 901px)').matches;
+    const availH = desktop ? Math.max(200, stage.clientHeight - pad * 2 - hintRoom) : Infinity;
+    cssW = Math.round(Math.min(availW, availH * ar));
     cssH = Math.round(cssW / ar);
     dpr = Math.min(window.devicePixelRatio || 1, 2);
     canvas.style.width = `${cssW}px`; canvas.style.height = `${cssH}px`;
@@ -1266,7 +1276,9 @@ export function viewCollage(app) {
 
   /* ---------- boot ---------- */
   const ro = new ResizeObserver(() => { sizeCanvas(); redraw(); });
-  ro.observe(wrap);
+  ro.observe(stage);
+  window.addEventListener('resize', sizeWorkspace);
+  sizeWorkspace();
   sizeCanvas();
   renderLayouts(); renderSlots(); renderThumbs(); updateExport();
   ensureFonts(styledTheme()).then(() => { renderLayouts(); redraw(); });
