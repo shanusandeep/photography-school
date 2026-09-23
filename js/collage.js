@@ -810,7 +810,7 @@ export function viewCollage(app) {
     <div class="pt-layout" data-layout-root>
       <aside class="pt-side">
         <div class="pt-side-head">
-          <span class="mono" style="color:var(--amber)">The Print Table</span>
+          <span class="mono" style="color:var(--amber)">Collage Maker · free</span>
           <span class="mono" style="color:var(--paper-faint)">photos stay on this device</span>
         </div>
         <section class="pt-step">

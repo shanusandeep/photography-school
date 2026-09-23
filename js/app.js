@@ -198,11 +198,11 @@ function viewHome() {
 
     <section class="pt-promo">
       <div>
-        <span class="mono" style="color:var(--amber)">NEW · MEMBERS' TOOL</span>
-        <h3>The Print Table — themed collages, print-ready</h3>
-        <p>Newborn, birthday, graduation, wedding, maternity or classic darkroom: pick a theme and a layout, drop in your photos, add the words, and download a 300-DPI file. Everything stays on your device.</p>
+        <span class="mono" style="color:var(--amber)">FREE MEMBERS' TOOL</span>
+        <h3>Collage Maker — themed collages, print-ready</h3>
+        <p>Newborn, birthday, graduation, wedding, maternity or classic darkroom: pick a theme and a layout, drop in your photos, add the words, and download a 300-DPI file. 37 layouts, palettes and font sets — everything stays on your device.</p>
       </div>
-      <a class="btn btn-primary" href="#/collage">Open the Print Table</a>
+      <a class="btn btn-primary" href="#/collage">Open Collage Maker</a>
     </section>
   </div>`;
 
