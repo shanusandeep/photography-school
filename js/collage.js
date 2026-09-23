@@ -984,10 +984,11 @@ export function viewCollage(app) {
   const textToolbar = $('[data-text-toolbar]');
   function positionTextToolbar(g) {
     const id = state.ui.selectedText, b = id && g.textBoxes[id];
-    if (!b) { textToolbar.hidden = true; return; }
+    if (!b || textDrag) { textToolbar.hidden = true; return; }      // never cover the words while they're being moved
     textToolbar.hidden = false;
-    textToolbar.style.left = `${Math.max(120, Math.min(cssW - 120, b.x + b.w / 2))}px`;
-    textToolbar.style.top = `${Math.min(cssH - 44, b.y + b.h + 10)}px`;
+    const above = b.y - 52;
+    textToolbar.style.left = `${Math.max(130, Math.min(cssW - 130, b.x + b.w / 2))}px`;
+    textToolbar.style.top = `${above > 4 ? above : Math.min(cssH - 44, b.y + b.h + 14)}px`;
   }
   function hitText(x, y) {
     if (!lastG) return null;
@@ -1011,7 +1012,7 @@ export function viewCollage(app) {
 
   function positionToolbar(g) {
     const i = state.ui.selected;
-    if (i === null || !state.cells[i]?.photoId || state.ui.swapFrom !== null) { toolbar.hidden = true; return; }
+    if (i === null || !state.cells[i]?.photoId || state.ui.swapFrom !== null || drag) { toolbar.hidden = true; return; }
     const cell = g.cells[i];
     toolbar.hidden = false;
     const half = Math.hypot(cell.rect.w, cell.rect.h) / 2;
@@ -1286,9 +1287,9 @@ export function viewCollage(app) {
 
   const endPointer = (e) => {
     pointers.delete(e.pointerId);
-    if (textDrag) { textDrag = null; renderSlots(); }
+    if (textDrag) { textDrag = null; renderSlots(); redraw(); }
     if (pinch && pointers.size < 2) { pinch = null; updateExport(); }
-    if (drag) { drag = null; updateExport(); }
+    if (drag) { drag = null; updateExport(); redraw(); }
   };
   canvas.addEventListener('pointerup', endPointer);
   canvas.addEventListener('pointercancel', endPointer);
