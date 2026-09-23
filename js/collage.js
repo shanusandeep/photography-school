@@ -11,7 +11,7 @@
 // one at a time at export.
 // ============================================================
 
-import { SHAPES, LAYOUTS, THEMES, exportPresets } from './data/collage.js';
+import { SHAPES, LAYOUTS, THEMES, PALETTES, FONT_SETS, COMBOS, DEFAULT_BODY, exportPresets } from './data/collage.js';
 
 /* ============================================================
    state (module singleton — survives hash navigation)
@@ -23,6 +23,7 @@ const state = {
   shapeId: 'square',
   layoutId: 'polaroid-wall',
   accent: null,               // null = theme default
+  style: { palette: null, font: null },   // palette / font-set applied over the theme
   photos: [],                 // { id, file, name, iw, ih, bmp }
   cells: [],                  // one per layout cell
   texts: {},                  // slotId -> user text (absent = theme default)
@@ -37,7 +38,18 @@ function currentTheme() { return THEMES.find(t => t.id === state.themeId); }
 function currentShape() { return SHAPES.find(s => s.id === state.shapeId); }
 function currentLayout() { return LAYOUTS.find(l => l.id === state.layoutId); }
 function photoById(id) { return state.photos.find(p => p.id === id) || null; }
-function accentColor() { return state.accent || currentTheme().palette.accent; }
+// a style (palette + font set) is a skin laid over the theme; the renderer only ever sees the result
+function applyStyle(base) {
+  const { palette, font } = state.style;
+  return {
+    ...base,
+    palette: palette ? { ...palette.roles, band: palette.roles.bg } : base.palette,
+    font: font ? font.display : base.font,
+    body: font ? font.body : DEFAULT_BODY,
+  };
+}
+const styledTheme = () => applyStyle(currentTheme());
+function accentColor() { return state.accent || styledTheme().palette.accent; }
 function hasContent() { return state.photos.length > 0 || Object.keys(state.texts).length > 0; }
 function slotText(slot) { return state.texts[slot.id] !== undefined ? state.texts[slot.id] : slot.default; }
 
@@ -50,8 +62,7 @@ window.addEventListener('beforeunload', (e) => {
    in preview and export
    ============================================================ */
 const fontLoads = new Map();
-function ensureFonts(theme) {
-  const { family, param, weight, italic } = theme.font;
+function loadFamily(family, param, spec) {
   if (!fontLoads.has(family)) {
     fontLoads.set(family, (async () => {
       if (!document.getElementById(`gf-${family}`)) {
@@ -60,13 +71,19 @@ function ensureFonts(theme) {
         link.href = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(family).replace(/%20/g, '+')}:${param}&display=swap`;
         document.head.appendChild(link);
       }
-      try {
-        await document.fonts.load(`${italic ? 'italic ' : ''}${weight} 40px "${family}"`);
-        await document.fonts.load('400 20px "Hanken Grotesk"');
-      } catch { /* fall back to system font; still deterministic per device */ }
+      try { await document.fonts.load(spec); }
+      catch { /* fall back to system font; still deterministic per device */ }
     })());
   }
   return fontLoads.get(family);
+}
+function ensureFonts(theme) {
+  const { family, param, weight, italic } = theme.font;
+  const body = theme.body || DEFAULT_BODY;
+  return Promise.all([
+    loadFamily(family, param, `${italic ? 'italic ' : ''}${weight} 40px "${family}"`),
+    loadFamily(body.family, body.param, `400 20px "${body.family}"`),
+  ]);
 }
 
 /* ============================================================
@@ -95,7 +112,7 @@ function resolveTextSlots(theme, layout) {
 }
 
 function geometry(W, H, opts = {}) {
-  const theme = opts.theme || currentTheme();
+  const theme = applyStyle(opts.theme || currentTheme());
   const layout = opts.layout || currentLayout();
   const u = Math.min(W, H);
   const m = theme.margin * u;
@@ -136,12 +153,13 @@ function pathRoundRect(ctx, r, radius) {
 }
 
 /* ---- board palette: dominant colours pulled from the placed photos ---- */
-function photoPalette(p) {
-  if (p.palette) return p.palette;
-  const c = document.createElement('canvas'); c.width = 24; c.height = 24;
+// up to five distinct dominant colours of a photo, most common first
+function photoColors(p) {
+  if (p.colors) return p.colors;
+  const c = document.createElement('canvas'); c.width = 32; c.height = 32;
   const cx = c.getContext('2d', { willReadFrequently: true });
-  cx.drawImage(p.bmp, 0, 0, 24, 24);
-  const d = cx.getImageData(0, 0, 24, 24).data;
+  cx.drawImage(p.bmp, 0, 0, 32, 32);
+  const d = cx.getImageData(0, 0, 32, 32).data;
   const buckets = new Map();
   for (let i = 0; i < d.length; i += 4) {
     const key = `${d[i] >> 5},${d[i + 1] >> 5},${d[i + 2] >> 5}`;
@@ -152,11 +170,32 @@ function photoPalette(p) {
   const sorted = [...buckets.values()].sort((a, b) => b.n - a.n).map(b => [b.r / b.n, b.g / b.n, b.b / b.n]);
   const picked = [];
   for (const col of sorted) {
-    if (picked.every(q => Math.hypot(q[0] - col[0], q[1] - col[1], q[2] - col[2]) > 55)) picked.push(col);
-    if (picked.length === 3) break;
+    if (picked.every(q => Math.hypot(q[0] - col[0], q[1] - col[1], q[2] - col[2]) > 48)) picked.push(col);
+    if (picked.length === 5) break;
   }
-  p.palette = picked.map(([r, g, b]) => `rgb(${r | 0},${g | 0},${b | 0})`);
-  return p.palette;
+  p.colors = picked.map(c => c.map(v => v | 0));
+  return p.colors;
+}
+function photoPalette(p) { return photoColors(p).map(([r, g, b]) => `rgb(${r},${g},${b})`); }
+
+const lumOf = ([r, g, b]) => 0.299 * r + 0.587 * g + 0.114 * b;
+const satOf = ([r, g, b]) => Math.max(r, g, b) - Math.min(r, g, b);
+const mixC = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);
+const hexC = (c) => '#' + c.map(v => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')).join('');
+
+// turn a photo's colours into bg / panel / mat / text / accent roles that stay legible
+function rolesFromColors(cols) {
+  const sorted = [...cols].sort((a, b) => lumOf(a) - lumOf(b));
+  let dark = sorted[0], light = sorted[sorted.length - 1];
+  if (lumOf(light) < 170) light = mixC(light, [255, 255, 255], 0.55);
+  if (lumOf(dark) > 90) dark = mixC(dark, [0, 0, 0], 0.6);
+  const mids = sorted.slice(1, -1);
+  const accent = (mids.length ? mids : sorted).slice().sort((a, b) => satOf(b) - satOf(a))[0];
+  return { bg: hexC(light), panel: hexC(mixC(light, mids[0] || dark, 0.35)), mat: hexC(mixC(light, [255, 255, 255], 0.7)), text: hexC(dark), accent: hexC(accent) };
+}
+function imagePalette(p) {
+  const cols = photoColors(p);
+  return { id: `img-${p.id}`, name: p.name, roles: rolesFromColors(cols), stripes: cols.map(hexC) };
 }
 function boardPalette(theme) {
   const out = [];
@@ -322,7 +361,7 @@ function drawTextCell(ctx, g, i) {
     }
     case 'quote': {
       const size = Math.min(r.h * 0.1, r.w * 0.085);
-      ctx.font = `italic 400 ${size}px "Hanken Grotesk", sans-serif`;
+      ctx.font = `italic 400 ${size}px "${(theme.body || DEFAULT_BODY).family}", sans-serif`;
       const lines = wrapLines(ctx, vals[0], maxW).slice(0, 6);
       const lh = size * 1.35, y0 = r.y + r.h / 2 - (lines.length - 1) * lh / 2 + size * 0.35;
       lines.forEach((ln, k) => ctx.fillText(ln, ax, y0 + k * lh));
@@ -392,7 +431,7 @@ function drawCaption(ctx, g, cell) {
   if (!text) return;
   const size = Math.max(9, u * 0.026);
   ctx.save();
-  ctx.font = `400 ${size}px "Hanken Grotesk", sans-serif`;
+  ctx.font = `400 ${size}px "${(theme.body || DEFAULT_BODY).family}", sans-serif`;
   setTracking(ctx, size * 0.32);
   const tw = ctx.measureText(text).width, padX = size * 1.2, h = size * 2.1;
   const x = p.x + p.w / 2 - (tw + 2 * padX) / 2, y = p.y + p.h / 2 - h / 2;
@@ -536,7 +575,7 @@ function drawOrnaments(ctx, g) {
 }
 
 function fontStr(theme, size, kind) {
-  if (kind === 'body') return `400 ${size}px "Hanken Grotesk", sans-serif`;
+  if (kind === 'body') return `400 ${size}px "${(theme.body || DEFAULT_BODY).family}", sans-serif`;
   const f = theme.font;
   return `${f.italic ? 'italic ' : ''}${f.weight} ${size}px "${f.family}", serif`;
 }
@@ -643,7 +682,7 @@ function setLayout(id) {
   order.forEach((pid, k) => { if (k < targets.length) state.cells[targets[k]].photoId = pid; });
   state.ui.selected = null; state.ui.swapFrom = null; state.undo = null;
 }
-function setTheme(id) { state.themeId = id; state.accent = null; }
+function setTheme(id) { state.themeId = id; state.accent = null; state.style = { palette: null, font: null }; }
 function setShape(id) { state.shapeId = id; if (!exportPresets(currentShape()).some(p => p.id === state.ui.preset)) state.ui.preset = 'web'; }
 function swapCells(a, b) {
   if (a === b) return;
@@ -682,8 +721,7 @@ function cellQuality(g, i) {
    export
    ============================================================ */
 async function exportCollage(preset, format) {
-  const theme = currentTheme();
-  await ensureFonts(theme);
+  await ensureFonts(styledTheme());
   const type = format === 'png' ? 'image/png' : 'image/jpeg';
   let result = null;
   for (const k of [1, 0.75, 0.5]) {
@@ -762,19 +800,31 @@ export function viewCollage(app) {
         </section>
 
         <section class="pt-step">
-          <div class="pt-step-title"><span class="mono">02 · Shape</span></div>
+          <div class="pt-step-title"><span class="mono">02 · Style</span><button class="chip" data-style-reset>theme default</button></div>
+          <div class="pt-sub mono">Combinations</div>
+          <div class="pt-scroll" data-combos></div>
+          <div class="pt-sub mono">Color palettes</div>
+          <div class="pt-palettes" data-palettes></div>
+          <div class="pt-sub mono">Image palettes — from your photos</div>
+          <div class="pt-scroll" data-imgpal></div>
+          <div class="pt-sub mono">Font sets</div>
+          <div class="pt-fonts" data-fonts></div>
+        </section>
+
+        <section class="pt-step">
+          <div class="pt-step-title"><span class="mono">03 · Shape</span></div>
           <div class="pt-chips" data-shapes>
             ${SHAPES.map(s => `<button class="pt-chip ${s.id === state.shapeId ? 'on' : ''}" data-shape="${s.id}"><b>${s.name}</b><span>${s.hint}</span></button>`).join('')}
           </div>
         </section>
 
         <section class="pt-step">
-          <div class="pt-step-title"><span class="mono">03 · Layout</span><span class="mono pt-suggest">★ suits this theme</span></div>
+          <div class="pt-step-title"><span class="mono">04 · Layout</span><span class="mono pt-suggest">★ suits this theme</span></div>
           <div class="pt-layouts" data-layouts></div>
         </section>
 
         <section class="pt-step">
-          <div class="pt-step-title"><span class="mono">04 · Words</span></div>
+          <div class="pt-step-title"><span class="mono">05 · Words</span></div>
           <div data-slots></div>
         </section>
       </aside>
@@ -890,9 +940,63 @@ export function viewCollage(app) {
   /* ---------- side panel ---------- */
   function currentPreset() { return exportPresets(currentShape()).find(p => p.id === state.ui.preset) || exportPresets(currentShape())[0]; }
 
+  /* ---------- styles ---------- */
+  const bar = (stripes) => `<span class="pt-bar">${stripes.map(c => `<i style="background:${c}"></i>`).join('')}</span>`;
+  function renderStyles() {
+    const st = state.style;
+    $('[data-combos]').innerHTML = COMBOS.map(c => {
+      const p = PALETTES.find(x => x.id === c.palette), f = FONT_SETS.find(x => x.id === c.font);
+      const on = st.palette?.id === p.id && st.font?.id === f.id;
+      return `<button class="pt-combo ${on ? 'on' : ''}" data-combo="${p.id}|${f.id}">${bar(p.stripes)}
+        <b style="font-family:'${f.display.family}';font-style:${f.display.italic ? 'italic' : 'normal'};font-weight:${f.display.weight}">${p.name}</b>
+        <span style="font-family:'${f.body.family}'">${f.body.family}</span></button>`;
+    }).join('');
+    $('[data-palettes]').innerHTML = PALETTES.map(p =>
+      `<button class="pt-pal ${st.palette?.id === p.id ? 'on' : ''}" data-palette="${p.id}" title="${p.name}">${bar(p.stripes)}<span>${p.name}</span></button>`).join('');
+    const imgs = state.photos.map(imagePalette);
+    $('[data-imgpal]').innerHTML = imgs.length
+      ? imgs.map(p => `<button class="pt-imgpal ${st.palette?.id === p.id ? 'on' : ''}" data-imgpalette="${p.id}" title="${esc(p.name)}">${bar(p.stripes)}<canvas width="72" height="46" data-photo="${p.id.slice(4)}"></canvas></button>`).join('')
+      : '<span class="pt-tray-empty">Add photos to get palettes drawn from them.</span>';
+    $('[data-imgpal]').querySelectorAll('canvas[data-photo]').forEach(c => {
+      const p = photoById(+c.dataset.photo); if (!p) return;
+      const cx = c.getContext('2d'), s = Math.max(72 / p.bmp.width, 46 / p.bmp.height);
+      cx.drawImage(p.bmp, (72 - p.bmp.width * s) / 2, (46 - p.bmp.height * s) / 2, p.bmp.width * s, p.bmp.height * s);
+    });
+    $('[data-fonts]').innerHTML = FONT_SETS.map(f =>
+      `<button class="pt-font ${st.font?.id === f.id ? 'on' : ''}" data-fontset="${f.id}">
+        <b style="font-family:'${f.display.family}';font-style:${f.display.italic ? 'italic' : 'normal'};font-weight:${f.display.weight}">${f.display.family}</b>
+        <span style="font-family:'${f.body.family}'">${f.body.family}</span></button>`).join('');
+    FONT_SETS.forEach(f => ensureFonts({ font: f.display, body: f.body }));   // so the cards preview in their own faces
+  }
+  async function applyStyleChange() {
+    await ensureFonts(styledTheme());
+    $('[data-accent]').value = accentColor();
+    renderStyles(); renderLayouts(); redraw();
+  }
+  $('[data-combos]').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-combo]'); if (!b) return;
+    const [pid, fid] = b.dataset.combo.split('|');
+    state.style = { palette: PALETTES.find(p => p.id === pid), font: FONT_SETS.find(f => f.id === fid) };
+    state.accent = null; applyStyleChange();
+  });
+  $('[data-palettes]').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-palette]'); if (!b) return;
+    state.style.palette = PALETTES.find(p => p.id === b.dataset.palette); state.accent = null; applyStyleChange();
+  });
+  $('[data-imgpal]').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-imgpalette]'); if (!b) return;
+    const p = photoById(+b.dataset.imgpalette.slice(4)); if (!p) return;
+    state.style.palette = imagePalette(p); state.accent = null; applyStyleChange();
+  });
+  $('[data-fonts]').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-fontset]'); if (!b) return;
+    state.style.font = FONT_SETS.find(f => f.id === b.dataset.fontset); applyStyleChange();
+  });
+  $('[data-style-reset]').addEventListener('click', () => { state.style = { palette: null, font: null }; state.accent = null; applyStyleChange(); });
+
   function renderLayouts() {
     const box = $('[data-layouts]');
-    const theme = currentTheme(), shape = currentShape();
+    const theme = styledTheme(), shape = currentShape();
     const btn = (l) => `
       <button class="pt-layout-btn ${l.id === state.layoutId ? 'on' : ''}" data-layout="${l.id}" title="${l.desc}">
         <canvas width="${Math.round(88 * (shape.ar >= 1 ? 1 : shape.ar))}" height="${Math.round(88 * (shape.ar >= 1 ? 1 / shape.ar : 1))}"></canvas>
@@ -934,6 +1038,7 @@ export function viewCollage(app) {
   }
 
   function renderThumbs() {
+    renderStyles();                       // image palettes follow the photo tray
     const box = $('[data-thumbs]');
     box.innerHTML = '';
     if (!state.photos.length) { box.innerHTML = '<span class="pt-tray-empty">No photos yet — add some, or click any empty cell.</span>'; return; }
@@ -1126,7 +1231,7 @@ export function viewCollage(app) {
     setTheme(btn.dataset.theme);
     $('[data-themes]').querySelectorAll('.pt-chip').forEach(b => b.classList.toggle('on', b === btn));
     $('[data-accent]').value = accentColor();
-    await ensureFonts(currentTheme());
+    await ensureFonts(styledTheme());
     renderLayouts(); renderSlots(); afterChange();
   });
   $('[data-shapes]').addEventListener('click', (e) => {
@@ -1164,6 +1269,6 @@ export function viewCollage(app) {
   ro.observe(wrap);
   sizeCanvas();
   renderLayouts(); renderSlots(); renderThumbs(); updateExport();
-  ensureFonts(theme).then(() => { renderLayouts(); redraw(); });
+  ensureFonts(styledTheme()).then(() => { renderLayouts(); redraw(); });
   draw();
 }

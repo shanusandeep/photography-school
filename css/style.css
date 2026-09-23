@@ -498,6 +498,28 @@ img.ph[src*="composition"] { filter: sepia(.4) contrast(1.05) brightness(.94); }
 .pt-accent { display: flex; align-items: center; gap: .7rem; margin-top: .7rem; }
 .pt-accent .mono { color: var(--paper-faint); }
 .pt-accent input[type="color"] { width: 38px; height: 26px; border: 1px solid var(--line); border-radius: 3px; background: none; padding: 0; cursor: pointer; }
+/* style picker: combinations, palettes, image palettes, font sets */
+.pt-sub { color: var(--paper-faint) !important; font-size: .58rem !important; margin: .9rem 0 .4rem; }
+.pt-scroll { display: flex; gap: .5rem; overflow-x: auto; padding-bottom: .35rem; scrollbar-width: thin; }
+.pt-bar { display: flex; height: 26px; border-radius: 4px; overflow: hidden; width: 100%; }
+.pt-bar i { flex: 1; display: block; }
+.pt-combo, .pt-pal, .pt-imgpal, .pt-font {
+  background: var(--ink-2); border: 1px solid var(--line); border-radius: var(--radius); cursor: pointer;
+  color: var(--paper); text-align: left; padding: .45rem; transition: border-color .15s, box-shadow .15s; font-family: var(--font-body);
+}
+.pt-combo:hover, .pt-pal:hover, .pt-imgpal:hover, .pt-font:hover { border-color: var(--amber); }
+.pt-combo.on, .pt-pal.on, .pt-imgpal.on, .pt-font.on { border-color: var(--amber); box-shadow: 0 0 0 1px var(--amber); }
+.pt-combo { min-width: 136px; display: flex; flex-direction: column; gap: .35rem; }
+.pt-combo b { font-size: 1.05rem; line-height: 1.1; }
+.pt-combo span, .pt-font span { display: block; font-size: .6rem; color: var(--paper-faint); letter-spacing: .1em; text-transform: uppercase; }
+.pt-palettes { display: grid; grid-template-columns: repeat(3, 1fr); gap: .4rem; }
+.pt-pal span { display: block; font-family: var(--font-mono); font-size: .54rem; letter-spacing: .08em; text-transform: uppercase; color: var(--paper-faint); margin-top: .3rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pt-imgpal { min-width: 88px; display: flex; flex-direction: column; gap: .3rem; }
+.pt-imgpal canvas { border-radius: 3px; display: block; width: 100%; height: auto; }
+.pt-fonts { display: grid; grid-template-columns: 1fr 1fr; gap: .4rem; }
+.pt-font b { display: block; font-size: 1.05rem; line-height: 1.15; margin-bottom: .15rem; }
+.pt-combo .pt-bar, .pt-pal .pt-bar, .pt-imgpal .pt-bar { display: flex; }   /* outranks the label `span` rules above */
+
 .pt-layouts { display: grid; grid-template-columns: repeat(3, 1fr); gap: .5rem; }
 .pt-group { grid-column: 1 / -1; color: var(--paper-faint); font-size: .58rem; margin: .4rem 0 -.1rem; padding-top: .3rem; border-top: 1px dashed var(--line); }
 .pt-group:first-child { border-top: none; margin-top: 0; padding-top: 0; }

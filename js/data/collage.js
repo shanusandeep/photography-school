@@ -124,6 +124,46 @@ export const LAYOUTS = [
     cells: [{ x: 0, y: 0, w: 1, h: 0.64 }, { x: 0, y: 0.67, w: 0.32, h: 0.33 }, { x: 0.34, y: 0.67, w: 0.32, h: 0.33 }, { x: 0.68, y: 0.67, w: 0.32, h: 0.33 }] },
 ];
 
+/* ---------------- styles: palettes, font sets, combinations ---------------- */
+// A palette maps colours to roles the renderer already understands
+// (bg / panel / mat / text / accent). `stripes` is what the picker shows.
+export const PALETTES = [
+  { id: 'arsenal',   name: 'Arsenal',    roles: { bg: '#f3f7f9', panel: '#dcecf1', mat: '#ffffff', text: '#2b3035', accent: '#e3703c' }, stripes: ['#2b3035', '#34526b', '#e3703c', '#f2a07b', '#dcecf1'] },
+  { id: 'roxborough', name: 'Roxborough', roles: { bg: '#ecdfd0', panel: '#dcc6ae', mat: '#f8f1e8', text: '#5a3a22', accent: '#b56a3a' }, stripes: ['#7a5033', '#8f4f1d', '#b56a3a', '#b8863a', '#c8a184'] },
+  { id: 'midnight',  name: 'Midnight',   roles: { bg: '#0b0f2b', panel: '#151b45', mat: '#e9ebf7', text: '#eef0ff', accent: '#8b97ff' }, stripes: ['#05071a', '#0b0f2b', '#252c6b', '#8b97ff', '#e9ebf7'] },
+  { id: 'olive-rose', name: 'Olive & Rose', roles: { bg: '#e9e6d6', panel: '#d9b48f', mat: '#fbfaf5', text: '#4a4a1e', accent: '#c98da2' }, stripes: ['#4a4a1e', '#b8622b', '#a88a2c', '#c98da2', '#d9b48f'] },
+  { id: 'mustard',   name: 'Mustard',    roles: { bg: '#fdf5e6', panel: '#f9e29b', mat: '#ffffff', text: '#3d2f2a', accent: '#e9b62e' }, stripes: ['#3d2f2a', '#7e6a3c', '#f2c94c', '#f0d5d1', '#f9e29b'] },
+  { id: 'sage',      name: 'Sage',       roles: { bg: '#e8ede4', panel: '#cfd9c6', mat: '#ffffff', text: '#33402f', accent: '#7f9a72' }, stripes: ['#33402f', '#5c7352', '#7f9a72', '#cfd9c6', '#e8ede4'] },
+  { id: 'blush',     name: 'Blush',      roles: { bg: '#fbf1ee', panel: '#f3dcd4', mat: '#ffffff', text: '#5b3d3d', accent: '#d98c8c' }, stripes: ['#5b3d3d', '#b56c6c', '#d98c8c', '#f3dcd4', '#fbf1ee'] },
+  { id: 'slate-coral', name: 'Slate & Coral', roles: { bg: '#2e3440', panel: '#3b4252', mat: '#eceff4', text: '#eceff4', accent: '#ff7a59' }, stripes: ['#2e3440', '#3b4252', '#4c566a', '#ff7a59', '#eceff4'] },
+  { id: 'espresso',  name: 'Espresso',   roles: { bg: '#2a1d16', panel: '#3b2a20', mat: '#efe4d6', text: '#f3e9dd', accent: '#c9975b' }, stripes: ['#2a1d16', '#3b2a20', '#6b4a35', '#c9975b', '#efe4d6'] },
+  { id: 'ocean',     name: 'Ocean',      roles: { bg: '#eaf3f6', panel: '#cfe3ea', mat: '#ffffff', text: '#123645', accent: '#1f7a8c' }, stripes: ['#123645', '#1f7a8c', '#5aa9b8', '#cfe3ea', '#eaf3f6'] },
+  { id: 'lavender',  name: 'Lavender',   roles: { bg: '#f3effa', panel: '#e3d9f3', mat: '#ffffff', text: '#3d2f5c', accent: '#8e6bd6' }, stripes: ['#3d2f5c', '#6a4fa3', '#8e6bd6', '#e3d9f3', '#f3effa'] },
+  { id: 'mono',      name: 'Monochrome', roles: { bg: '#f4f4f4', panel: '#e2e2e2', mat: '#ffffff', text: '#151515', accent: '#151515' }, stripes: ['#151515', '#4a4a4a', '#9a9a9a', '#e2e2e2', '#ffffff'] },
+];
+
+export const DEFAULT_BODY = { family: 'Hanken Grotesk', param: 'wght@400;600' };
+
+export const FONT_SETS = [
+  { id: 'playfair-montserrat', name: 'Playfair & Montserrat', display: { family: 'Playfair Display', param: 'wght@700', weight: 700, italic: false }, body: { family: 'Montserrat', param: 'wght@400;600' } },
+  { id: 'bebas-hanken', name: 'Bebas & Hanken', display: { family: 'Bebas Neue', param: 'wght@400', weight: 400, italic: false }, body: DEFAULT_BODY },
+  { id: 'cormorant-quicksand', name: 'Cormorant & Quicksand', display: { family: 'Cormorant Garamond', param: 'ital,wght@0,600;1,600', weight: 600, italic: true }, body: { family: 'Quicksand', param: 'wght@400;600' } },
+  { id: 'abril-lato', name: 'Abril & Lato', display: { family: 'Abril Fatface', param: 'wght@400', weight: 400, italic: false }, body: { family: 'Lato', param: 'wght@400;700' } },
+  { id: 'vibes-raleway', name: 'Great Vibes & Raleway', display: { family: 'Great Vibes', param: 'wght@400', weight: 400, italic: false }, body: { family: 'Raleway', param: 'wght@400;600' } },
+  { id: 'arbutus-barlow', name: 'Arbutus Slab & Barlow', display: { family: 'Arbutus Slab', param: 'wght@400', weight: 400, italic: false }, body: { family: 'Barlow', param: 'wght@400;600' } },
+  { id: 'caveat-quicksand', name: 'Caveat & Quicksand', display: { family: 'Caveat', param: 'wght@700', weight: 700, italic: false }, body: { family: 'Quicksand', param: 'wght@400;600' } },
+  { id: 'dmserif-dmsans', name: 'DM Serif & DM Sans', display: { family: 'DM Serif Display', param: 'wght@400', weight: 400, italic: false }, body: { family: 'DM Sans', param: 'wght@400;600' } },
+  { id: 'young-hanken', name: 'Young Serif & Hanken', display: { family: 'Young Serif', param: 'wght@400', weight: 400, italic: false }, body: DEFAULT_BODY },
+];
+
+// curated palette + font pairings
+export const COMBOS = [
+  { palette: 'arsenal', font: 'playfair-montserrat' }, { palette: 'roxborough', font: 'cormorant-quicksand' },
+  { palette: 'midnight', font: 'bebas-hanken' }, { palette: 'olive-rose', font: 'abril-lato' },
+  { palette: 'blush', font: 'vibes-raleway' }, { palette: 'sage', font: 'arbutus-barlow' },
+  { palette: 'espresso', font: 'dmserif-dmsans' }, { palette: 'mustard', font: 'caveat-quicksand' },
+];
+
 /* ---------------- themes ---------------- */
 // A theme is a skin + content pack applied over any layout:
 //   font      Google font for headline/numeral (weight must exist for the family)
