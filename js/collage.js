@@ -14,7 +14,7 @@ import {
   styledTheme, accentColor, slotText, textOv, setTextOv, slotsFor, isPhotoCell, firstEmptyPhotoCell, photoCellIndices,
   cellDef, setCellOv, hasCellOv, clearCellOv, geometry as geometryOf, fitPhoto, cellQuality as cellQualityOf,
   setLayout as setLayoutOf, setTheme as setThemeOf, setShape as setShapeOf, swapCells as swapCellsOf, assignPhoto as assignPhotoOf,
-  clearCell as clearCellOf, removePhoto as removePhotoOf, placePhotos, resetDocument, History, serializeDraft, deserializeDraft, restore,
+  clearCell as clearCellOf, removePhoto as removePhotoOf, placePhotos, resetDocument, History, serializeDraft, deserializeDraft, restore, suggestedLayouts,
 } from './collage/core.js';
 import { saveDraft, loadDraft, clearDraft, isQuotaError } from './collage/draft.js';
 import { drawBackground, drawCell, drawForeground, imagePalette as imagePaletteOf, isDark, rotateTo } from './collage/render.js';
@@ -215,61 +215,77 @@ function discardDraft() { clearDraft().catch(() => {}); }
 if (['localhost', '127.0.0.1'].includes(location.hostname)) window.__pt = { state, geometry, exportCollage, addPhotos, history, draft, loadDraft };
 
 /* ============================================================
-   view
+   view — workspace: tool tabs (Photos → Layout → Style → Text),
+   a contextual card for whatever is selected, the canvas stage and
+   a slim action bar (add photos, undo/redo, export)
    ============================================================ */
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+const TABS = [['photos', 'Photos'], ['layout', 'Layout'], ['style', 'Style'], ['text', 'Text']];
+const LAYOUT_FILTERS = [['suggested', 'Suggested'], ['moodboard', 'Moodboard'], ['photos', 'Photos only'], ['classic', 'Classic'], ['all', 'All']];
+const HINT_DEFAULT = 'Drag a photo to reposition · scroll or pinch to zoom · click a photo or words for controls · Esc to deselect';
 
 export function viewCollage(app) {
   app.innerHTML = `
   <div class="view pt">
     <div class="pt-layout" data-layout-root>
-      <aside class="pt-side">
+      <aside class="pt-side" aria-label="Collage tools">
         <div class="pt-side-head">
           <span class="mono" style="color:var(--amber)">Collage Maker · free</span>
           <span class="mono" style="color:var(--paper-faint)" data-save-status>photos stay on this device</span>
         </div>
-        <section class="pt-step">
-          <div class="pt-step-title"><span class="mono">01 · Theme</span></div>
-          <div class="pt-chips" data-themes>
-            ${THEMES.map(t => `<button class="pt-chip ${t.id === state.themeId ? 'on' : ''}" data-theme="${t.id}"><b>${t.name}</b><span>${t.tag}</span></button>`).join('')}
-          </div>
-          <label class="pt-accent"><span class="mono">Accent</span><input type="color" data-accent aria-label="Accent colour" value="${accentColor(state)}"><button class="chip" data-accent-reset>reset</button></label>
-        </section>
+        <div class="pt-tabs" role="tablist" aria-label="Tool groups">
+          ${TABS.map(([id, label]) => `<button role="tab" id="pt-tab-${id}" aria-controls="pt-panel-${id}" aria-selected="${state.ui.tab === id}" tabindex="${state.ui.tab === id ? 0 : -1}" data-tab="${id}">${label}</button>`).join('')}
+        </div>
+        <div class="pt-context" data-context hidden aria-live="polite"></div>
+        <div class="pt-panels" data-panels>
 
-        <section class="pt-step">
-          <div class="pt-step-title"><span class="mono">02 · Style</span><button class="chip" data-style-reset>theme default</button></div>
-          <div class="pt-sub mono">Combinations</div>
-          <div class="pt-scroll" data-combos></div>
-          <div class="pt-sub mono">Color palettes</div>
-          <div class="pt-palettes" data-palettes></div>
-          <div class="pt-sub mono">Image palettes — from your photos</div>
-          <div class="pt-scroll" data-imgpal></div>
-          <div class="pt-sub mono">Font sets</div>
-          <div class="pt-fonts" data-fonts></div>
-        </section>
+          <section class="pt-panel" id="pt-panel-photos" role="tabpanel" aria-labelledby="pt-tab-photos" data-panel="photos">
+            <div class="pt-row">
+              <button class="btn btn-primary btn-small" data-add>+ Add photos</button>
+              <button class="btn btn-ghost btn-small" data-samples>Try sample photos</button>
+            </div>
+            <div class="pt-photos" data-photos></div>
+            <p class="pt-note">Click a placed photo to select its section; click an unplaced one to drop it into the selected (or next empty) section. JPEG, PNG, WebP or GIF · photos stay on this device.</p>
+          </section>
 
-        <section class="pt-step">
-          <div class="pt-step-title"><span class="mono">03 · Shape</span></div>
-          <div class="pt-chips" data-shapes>
-            ${SHAPES.map(s => `<button class="pt-chip ${s.id === state.shapeId ? 'on' : ''}" data-shape="${s.id}"><b>${s.name}</b><span>${s.hint}</span></button>`).join('')}
-          </div>
-        </section>
+          <section class="pt-panel" id="pt-panel-layout" role="tabpanel" aria-labelledby="pt-tab-layout" data-panel="layout" hidden>
+            <div class="pt-sub mono">Canvas shape</div>
+            <div class="pt-chips" data-shapes>
+              ${SHAPES.map(s => `<button class="pt-chip ${s.id === state.shapeId ? 'on' : ''}" data-shape="${s.id}"><b>${s.name}</b><span>${s.hint}</span></button>`).join('')}
+            </div>
+            <label class="pt-range"><span class="mono">Spacing</span><input type="range" data-spacing min="0" max="100" value="${state.spacing}" aria-label="Spacing between sections"><output data-spacing-out>${state.spacing}</output></label>
+            <div class="pt-sub mono" style="display:flex;justify-content:space-between;align-items:baseline">Layouts <button class="chip" data-layout-reset hidden>↔ reset sizes</button></div>
+            <div class="pt-filters" data-layout-filters>
+              ${LAYOUT_FILTERS.map(([id, label]) => `<button class="chip ${state.ui.layoutFilter === id ? 'on' : ''}" data-filter="${id}">${label}</button>`).join('')}
+            </div>
+            <div class="pt-layouts" data-layouts></div>
+            <p class="pt-note">Click a section on the canvas for resize handles and a move grip; photos refit automatically. (Handles need a pointer; everything else works with the keyboard.)</p>
+          </section>
 
-        <section class="pt-step">
-          <div class="pt-step-title"><span class="mono">04 · Layout</span><button class="chip" data-layout-reset hidden>↔ reset sizes</button></div>
-          <p class="pt-note">Click a section to get handles — drag them to resize, drag the grip to move. Photos refit automatically; use zoom to adjust. Keyboard: sections are resized with a pointer only; the panel controls and thumbnails work with Tab and Enter.</p>
-          <label class="pt-range"><span class="mono">Spacing</span><input type="range" data-spacing min="0" max="100" value="${state.spacing}" aria-label="Spacing between sections"><output data-spacing-out>${state.spacing}</output></label>
-          <div class="pt-layouts" data-layouts></div>
-        </section>
+          <section class="pt-panel" id="pt-panel-style" role="tabpanel" aria-labelledby="pt-tab-style" data-panel="style" hidden>
+            <div class="pt-sub mono">Theme</div>
+            <div class="pt-chips" data-themes>
+              ${THEMES.map(t => `<button class="pt-chip ${t.id === state.themeId ? 'on' : ''}" data-theme="${t.id}"><b>${t.name}</b><span>${t.tag}</span></button>`).join('')}
+            </div>
+            <label class="pt-accent"><span class="mono">Accent</span><input type="color" data-accent aria-label="Accent colour" value="${accentColor(state)}"><button class="chip" data-accent-reset>reset</button><span style="flex:1"></span><button class="chip" data-style-reset>theme default</button></label>
+            <details data-open="combos" ${state.ui.open.combos !== false ? 'open' : ''}><summary class="mono">Combinations</summary><div class="pt-scroll" data-combos></div></details>
+            <details data-open="palettes" ${state.ui.open.palettes ? 'open' : ''}><summary class="mono">Color palettes</summary><div class="pt-palettes" data-palettes></div></details>
+            <details data-open="imgpal" ${state.ui.open.imgpal ? 'open' : ''}><summary class="mono">Image palettes — from your photos</summary><div class="pt-scroll" data-imgpal></div></details>
+            <details data-open="fonts" ${state.ui.open.fonts ? 'open' : ''}><summary class="mono">Font sets</summary><div class="pt-fonts" data-fonts></div></details>
+          </section>
 
-        <section class="pt-step">
-          <div class="pt-step-title"><span class="mono">05 · Words</span><button class="chip ${state.ui.hideText ? 'on' : ''}" data-hide-all>${state.ui.hideText ? 'show words' : 'photos only'}</button></div>
-          <p class="pt-note">Words are off by default. Turn them on to add a title, caption or number — then drag them on the canvas to move, click for size, reset and remove.</p>
-          <div data-slots></div>
-        </section>
+          <section class="pt-panel" id="pt-panel-text" role="tabpanel" aria-labelledby="pt-tab-text" data-panel="text" hidden>
+            <div class="pt-row" style="justify-content:space-between;align-items:center">
+              <span class="pt-sub mono" style="margin:0">Words on the collage</span>
+              <button class="chip ${state.ui.hideText ? '' : 'on'}" data-hide-all role="switch" aria-checked="${!state.ui.hideText}">${state.ui.hideText ? 'turn words on' : 'words on'}</button>
+            </div>
+            <p class="pt-note">Words are off by default. Turn them on to add a title, caption or number — then drag them on the canvas, or use “adjust” here for size and position.</p>
+            <div data-slots></div>
+          </section>
+        </div>
       </aside>
 
-      <main class="pt-main">
+      <div class="pt-main">
         <div class="pt-stage" data-stage>
           <div class="pt-canvas-wrap" data-wrap>
             <canvas data-preview tabindex="0" role="img" aria-label="Collage preview. Photos and words can be dragged with a pointer; use the panel controls for keyboard editing."></canvas>
@@ -277,9 +293,9 @@ export function viewCollage(app) {
               <button data-act="zoom-out" title="Zoom out" data-photo-only aria-label="Zoom out">−</button>
               <button data-act="zoom-in" title="Zoom in" data-photo-only aria-label="Zoom in">+</button>
               <span class="pt-sep" data-photo-only></span>
-              <button data-act="up" title="Move to previous cell" data-photo-only aria-label="Move photo to previous section">↑</button>
-              <button data-act="down" title="Move to next cell" data-photo-only aria-label="Move photo to next section">↓</button>
-              <button data-act="swap" title="Swap with another cell" data-photo-only aria-label="Swap with another section">⇄ Swap</button>
+              <button data-act="up" title="Move to previous section" data-photo-only aria-label="Move photo to previous section">↑</button>
+              <button data-act="down" title="Move to next section" data-photo-only aria-label="Move photo to next section">↓</button>
+              <button data-act="swap" title="Swap with another section" data-photo-only aria-label="Swap with another section">⇄ Swap</button>
               <span class="pt-sep" data-photo-only></span>
               <button data-act="replace" title="Replace photo" data-photo-only aria-label="Replace photo">Replace</button>
               <button data-act="add" title="Add a photo here" data-empty-only aria-label="Add a photo here">+ Add photo</button>
@@ -299,7 +315,7 @@ export function viewCollage(app) {
               <button data-tact="done" title="Done — hide these controls" aria-label="Done">✕</button>
             </div>
           </div>
-          <p class="pt-hint" data-hint>Click an empty cell to add photos · drag a photo to reposition · scroll or pinch to zoom · click a photo for more controls</p>
+          <p class="pt-hint" data-hint>${HINT_DEFAULT}</p>
           <div class="pt-empty" data-empty hidden>
             <span class="mono" style="color:var(--amber)">Collage Maker</span>
             <h2>Create a photo collage</h2>
@@ -320,22 +336,22 @@ export function viewCollage(app) {
         </div>
 
         <div class="pt-bottom">
-          <div class="pt-tray">
-            <button class="btn btn-primary btn-small" data-add>+ Add photos</button>
-            <div class="pt-thumbs" data-thumbs></div>
+          <div class="pt-actions">
+            <button class="btn btn-primary btn-small" data-add-bottom>+ Add photos</button>
+            <button class="btn btn-ghost btn-small" data-undo disabled title="Undo (Ctrl/Cmd+Z)" aria-label="Undo">↺ Undo</button>
+            <button class="btn btn-ghost btn-small" data-redo disabled title="Redo (Ctrl/Cmd+Shift+Z)" aria-label="Redo">↻ Redo</button>
             <input type="file" accept="image/*" multiple hidden data-file aria-label="Choose photos">
           </div>
           <div class="pt-export">
             <div class="pt-export-row">
-              <label><span class="mono">Size</span><select data-preset></select></label>
-              <label><span class="mono">Format</span><select data-format>
+              <label><span class="mono">Size</span><select data-preset aria-label="Export size"></select></label>
+              <label><span class="mono">Format</span><select data-format aria-label="Export format">
                 <option value="jpeg" ${state.ui.format === 'jpeg' ? 'selected' : ''}>JPEG (smaller)</option>
                 <option value="png" ${state.ui.format === 'png' ? 'selected' : ''}>PNG (lossless)</option>
               </select></label>
               <button class="btn btn-primary" data-download>Download</button>
-              <button class="btn btn-ghost btn-small" data-undo disabled title="Undo (Ctrl/Cmd+Z)">↺ Undo</button>
-              <button class="btn btn-ghost btn-small" data-redo disabled title="Redo (Ctrl/Cmd+Shift+Z)">↻ Redo</button>
-              <button class="btn btn-ghost btn-small" data-new>New collage</button>
+              <span class="pt-sep-v" aria-hidden="true"></span>
+              <button class="btn btn-ghost btn-small pt-danger-btn" data-new>New collage</button>
             </div>
             <p class="pt-export-info" data-export-info></p>
             <p class="pt-export-warn" data-export-warn hidden></p>
@@ -345,34 +361,56 @@ export function viewCollage(app) {
             <p class="pt-export-warn" data-save-note hidden></p>
           </div>
         </div>
-      </main>
+      </div>
     </div>
   </div>`;
 
   const $ = (s) => app.querySelector(s);
   const wrap = $('[data-wrap]'), canvas = $('[data-preview]'), ctx = canvas.getContext('2d');
-  const toolbar = $('[data-toolbar]');
+  const toolbar = $('[data-toolbar]'), textToolbar = $('[data-text-toolbar]');
   const fileInput = $('[data-file]');
+  const stage = $('[data-stage]'), layoutRoot = $('[data-layout-root]'), side = $('.pt-side');
   let fileTarget = null;            // cell index a file pick is aimed at
   let cssW = 0, cssH = 0, dpr = 1;
   let raf = 0;
   let lastG = null;
   let drag = null, pinch = null, textDrag = null, cellDrag = null;
-
-  /* ---------- preview rendering ---------- */
-  const stage = $('[data-stage]');
-  const layoutRoot = $('[data-layout-root]');
   const isDesktop = () => window.matchMedia('(min-width: 901px)').matches;
-  // full-page workspace: the layout grid fills the viewport under the top bar (desktop only)
+
+  /* ---------- tool tabs (desktop: always open; phones: a collapsible sheet) ---------- */
+  function showTab(id, { focus = false, toggle = false, keep = false } = {}) {
+    const same = state.ui.tab === id;
+    if (toggle && same && !isDesktop()) { side.classList.toggle('collapsed'); }
+    else { state.ui.tab = id; if (!keep) side.classList.remove('collapsed'); }
+    app.querySelectorAll('[role="tab"]').forEach(b => {
+      const on = b.dataset.tab === state.ui.tab;
+      b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1;
+      if (on && focus) b.focus();
+    });
+    app.querySelectorAll('[data-panel]').forEach(p => { p.hidden = p.dataset.panel !== state.ui.tab; });
+    sizeCanvas(); redraw();
+  }
+  $('.pt-tabs').addEventListener('click', (e) => { const b = e.target.closest('[data-tab]'); if (b) showTab(b.dataset.tab, { toggle: true }); });
+  $('.pt-tabs').addEventListener('keydown', (e) => {
+    const ids = TABS.map(t => t[0]), k = ids.indexOf(state.ui.tab);
+    if (e.key === 'ArrowRight') { e.preventDefault(); showTab(ids[(k + 1) % ids.length], { focus: true }); }
+    if (e.key === 'ArrowLeft') { e.preventDefault(); showTab(ids[(k - 1 + ids.length) % ids.length], { focus: true }); }
+    if (e.key === 'Home') { e.preventDefault(); showTab(ids[0], { focus: true }); }
+    if (e.key === 'End') { e.preventDefault(); showTab(ids[ids.length - 1], { focus: true }); }
+  });
+  app.querySelectorAll('details[data-open]').forEach(d => d.addEventListener('toggle', () => { state.ui.open[d.dataset.open] = d.open; }));
+
+  /* ---------- sizing ---------- */
   function sizeWorkspace() {
     const topbar = document.querySelector('.topbar');
-    layoutRoot.style.height = isDesktop() ? `${window.innerHeight - (topbar ? topbar.offsetHeight : 0)}px` : '';
+    layoutRoot.style.height = `${window.innerHeight - (topbar ? topbar.offsetHeight : 0)}px`;
+    if (isDesktop()) side.classList.remove('collapsed');
   }
   function sizeCanvas() {
     const ar = currentShape(state).ar;
-    const pad = 28, hintRoom = 34;
-    const availW = Math.max(200, stage.clientWidth - pad * 2);
-    const availH = isDesktop() ? Math.max(200, stage.clientHeight - pad * 2 - hintRoom) : Infinity;
+    const pad = isDesktop() ? 28 : 12, hintRoom = isDesktop() ? 34 : 28;
+    const availW = Math.max(120, stage.clientWidth - pad * 2);
+    const availH = Math.max(120, stage.clientHeight - pad * 2 - (isDesktop() ? hintRoom : 0));
     cssW = Math.round(Math.min(availW, availH * ar));
     cssH = Math.round(cssW / ar);
     dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -380,15 +418,16 @@ export function viewCollage(app) {
     canvas.width = Math.round(cssW * dpr); canvas.height = Math.round(cssH * dpr);
   }
 
+  /* ---------- preview rendering ---------- */
   function draw() {
     raf = 0;
+    if (!document.body.contains(canvas)) return;          // view was replaced by navigation
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const g = geometry(cssW, cssH);
     drawBackground(state, ctx, g);
     g.cells.forEach((_, i) => drawCell(state, ctx, g, i, photoById(state, state.cells[i].photoId)?.bmp || null, { preview: true, makeCanvas }));
     drawForeground(state, ctx, g, makeCanvas);
 
-    // low-resolution badges for the chosen export size
     const preset = presetOf(state);
     const ge = geometry(preset.w, preset.h);
     g.cells.forEach((cell, i) => {
@@ -409,7 +448,6 @@ export function viewCollage(app) {
       ctx.strokeRect(tb.x - 6, tb.y - 4, tb.w + 12, tb.h + 8); ctx.restore();
     }
     positionTextToolbar(g);
-
     const hi = state.ui.swapFrom ?? state.ui.selected;
     if (hi !== null && g.cells[hi]) {
       const cell = g.cells[hi];
@@ -421,8 +459,8 @@ export function viewCollage(app) {
     }
     positionToolbar(g);
     $('[data-layout-reset]').hidden = !state.cellOv[g.layout.id];
+    renderContext(g);
   }
-  // rAF is paused in hidden tabs; fall back to a timer so state never gets ahead of the canvas
   const redraw = () => { scheduleSave(); if (!raf) raf = document.hidden ? setTimeout(draw, 16) : requestAnimationFrame(draw); };
   function renderSaveStatus() {
     const st = $('[data-save-status]'), note = $('[data-save-note]');
@@ -433,36 +471,15 @@ export function viewCollage(app) {
   }
   draft.listeners.clear(); draft.listeners.add(renderSaveStatus);
 
-  const textToolbar = $('[data-text-toolbar]');
+  /* ---------- floating toolbars on the canvas ---------- */
   function positionTextToolbar(g) {
     const id = state.ui.selectedText, b = id && g.textBoxes[id];
-    if (!b || textDrag) { textToolbar.hidden = true; return; }      // never cover the words while they're being moved
+    if (!b || textDrag) { textToolbar.hidden = true; return; }
     textToolbar.hidden = false;
     const above = b.y - 52;
     textToolbar.style.left = `${Math.max(130, Math.min(cssW - 130, b.x + b.w / 2))}px`;
     textToolbar.style.top = `${above > 4 ? above : Math.min(cssH - 44, b.y + b.h + 14)}px`;
   }
-  function hitText(x, y) {
-    if (!lastG) return null;
-    for (const id of Object.keys(lastG.textBoxes).reverse()) {
-      const b = lastG.textBoxes[id];
-      if (x >= b.x - 6 && x <= b.x + b.w + 6 && y >= b.y - 4 && y <= b.y + b.h + 4) return id;
-    }
-    return null;
-  }
-  textToolbar.addEventListener('click', (e) => {
-    const act = e.target.closest('[data-tact]')?.dataset.tact, id = state.ui.selectedText;
-    if (!act || !id) return;
-    const ov = textOv(state, id);
-    if (act !== 'done') commit();
-    if (act === 'bigger') setTextOv(state, id, { scale: Math.min(3, ov.scale * 1.12) });
-    else if (act === 'smaller') setTextOv(state, id, { scale: Math.max(0.4, ov.scale / 1.12) });
-    else if (act === 'reset') delete state.textOv[id];
-    else if (act === 'hide') { setTextOv(state, id, { hidden: true }); state.ui.selectedText = null; }
-    else if (act === 'done') state.ui.selectedText = null;
-    renderSlots(); redraw();
-  });
-
   function positionToolbar(g) {
     const i = state.ui.selected;
     if (i === null || state.ui.swapFrom !== null || drag || cellDrag) { toolbar.hidden = true; return; }
@@ -475,26 +492,132 @@ export function viewCollage(app) {
     if (!hasPhoto && cell.type !== 'photo' && !ov) { toolbar.hidden = true; return; }
     toolbar.hidden = false;
     const half = Math.hypot(cell.rect.w, cell.rect.h) / 2;
-    const top = Math.min(cssH - 44, cell.center.y + (cell.rot ? half * 0.9 : cell.rect.h / 2) + 22);   // clear of the bottom handles
+    const top = Math.min(cssH - 44, cell.center.y + (cell.rot ? half * 0.9 : cell.rect.h / 2) + 22);
     toolbar.style.left = `${Math.max(120, Math.min(cssW - 120, cell.center.x))}px`;
     toolbar.style.top = `${top}px`;
   }
+  function hitText(x, y) {
+    if (!lastG) return null;
+    for (const id of Object.keys(lastG.textBoxes).reverse()) {
+      const b = lastG.textBoxes[id];
+      if (x >= b.x - 6 && x <= b.x + b.w + 6 && y >= b.y - 4 && y <= b.y + b.h + 4) return id;
+    }
+    return null;
+  }
 
-  // continuous edits (typing, sliders, wheel zoom) coalesce into one history step per burst
+  /* ---------- selection actions (shared by toolbars and the context card) ---------- */
+  function deselect() { state.ui.selected = null; state.ui.selectedText = null; state.ui.swapFrom = null; }
+  function textAction(act) {
+    const id = state.ui.selectedText; if (!id) return;
+    const ov = textOv(state, id);
+    if (act !== 'done') commit();
+    if (act === 'bigger') setTextOv(state, id, { scale: Math.min(3, ov.scale * 1.12) });
+    else if (act === 'smaller') setTextOv(state, id, { scale: Math.max(0.4, ov.scale / 1.12) });
+    else if (act === 'reset') delete state.textOv[id];
+    else if (act === 'hide') { setTextOv(state, id, { hidden: true }); state.ui.selectedText = null; }
+    else if (act === 'done') state.ui.selectedText = null;
+    else if (act.startsWith('nudge-')) {
+      const [, dir] = act.split('-'); const step = 0.02;
+      setTextOv(state, id, { dx: ov.dx + (dir === 'l' ? -step : dir === 'r' ? step : 0), dy: ov.dy + (dir === 'u' ? -step : dir === 'd' ? step : 0) });
+    }
+    renderSlots(); redraw();
+  }
+  function cellAction(act) {
+    const i = state.ui.selected; if (i === null) return;
+    const c = state.cells[i] || {};
+    if (['zoom-in', 'zoom-out', 'reset-cell'].includes(act) || act.startsWith('crop-')) commit();
+    switch (act) {
+      case 'zoom-in': c.zoom = Math.min(4, c.zoom * 1.15); break;
+      case 'zoom-out': c.zoom = Math.max(1, c.zoom / 1.15); break;
+      case 'up': { const ps = photoCellIndices(state), k = ps.indexOf(i); if (k > 0) { swapCells(i, ps[k - 1]); state.ui.selected = ps[k - 1]; } break; }
+      case 'down': { const ps = photoCellIndices(state), k = ps.indexOf(i); if (k < ps.length - 1) { swapCells(i, ps[k + 1]); state.ui.selected = ps[k + 1]; } break; }
+      case 'swap': state.ui.swapFrom = i; $('[data-hint]').textContent = 'Swap mode — click the section to swap with (click the same section to cancel).'; break;
+      case 'replace': case 'add': fileTarget = i; fileInput.click(); break;
+      case 'clear': clearCell(i); break;
+      case 'reset-cell': clearCellOv(state, currentLayout(state), i); renderLayouts(); break;
+      case 'done': deselect(); break;
+      case 'crop-l': c.panX = Math.max(0, c.panX - 0.05); break;
+      case 'crop-r': c.panX = Math.min(1, c.panX + 0.05); break;
+      case 'crop-u': c.panY = Math.max(0, c.panY - 0.05); break;
+      case 'crop-d': c.panY = Math.min(1, c.panY + 0.05); break;
+    }
+    afterChange();
+  }
+  toolbar.addEventListener('click', (e) => { const act = e.target.closest('[data-act]')?.dataset.act; if (act) cellAction(act); });
+  textToolbar.addEventListener('click', (e) => { const act = e.target.closest('[data-tact]')?.dataset.tact; if (act) textAction(act); });
+
+  // the contextual card mirrors the floating toolbars for keyboard and phone users
+  function renderContext(g) {
+    const box = $('[data-context]');
+    const i = state.ui.selected, tid = state.ui.selectedText;
+    if ((i !== null || tid) && !isDesktop() && box.hidden) side.classList.remove('collapsed');   // phones: open the sheet so the controls are reachable
+    if (tid) {
+      const slot = slotsFor(currentTheme(state), currentLayout(state)).find(x => x.id === tid);
+      const ov = textOv(state, tid);
+      box.hidden = false;
+      box.innerHTML = `
+        <div class="pt-ctx-head"><span class="mono">Selected text</span><b>${esc(slot ? slot.label : tid)}</b></div>
+        <div class="pt-ctx-row" role="group" aria-label="Text size">
+          <button class="chip" data-ctx-t="smaller" aria-label="Smaller text">A−</button><button class="chip" data-ctx-t="bigger" aria-label="Bigger text">A+</button>
+          <span class="mono pt-ctx-val">${Math.round(ov.scale * 100)}%</span>
+        </div>
+        <div class="pt-ctx-row" role="group" aria-label="Nudge position">
+          <button class="chip" data-ctx-t="nudge-l" aria-label="Nudge left">◀</button><button class="chip" data-ctx-t="nudge-u" aria-label="Nudge up">▲</button><button class="chip" data-ctx-t="nudge-d" aria-label="Nudge down">▼</button><button class="chip" data-ctx-t="nudge-r" aria-label="Nudge right">▶</button>
+          <span style="flex:1"></span><button class="chip" data-ctx-t="reset">↺ reset</button>
+        </div>
+        <div class="pt-ctx-row"><button class="chip pt-danger" data-ctx-t="hide">remove text</button><span style="flex:1"></span><button class="chip" data-ctx-t="done">done</button></div>`;
+      return;
+    }
+    if (i === null || !g.cells[i]) { box.hidden = true; box.innerHTML = ''; return; }
+    const cell = g.cells[i], c = state.cells[i], p = c.photoId ? photoById(state, c.photoId) : null;
+    const ov = hasCellOv(state, g.layout, i);
+    box.hidden = false;
+    if (cell.type !== 'photo') {
+      box.innerHTML = `<div class="pt-ctx-head"><span class="mono">Selected section ${i + 1}</span><b>${cell.type === 'text' ? 'Words panel' : 'Colour swatches'}</b></div>
+        <div class="pt-ctx-row">${ov ? '<button class="chip" data-ctx-c="reset-cell">↔ reset size</button>' : '<span class="pt-note" style="margin:0">Drag its handles on the canvas to resize.</span>'}<span style="flex:1"></span><button class="chip" data-ctx-c="done">done</button></div>`;
+      return;
+    }
+    if (!p) {
+      box.innerHTML = `<div class="pt-ctx-head"><span class="mono">Selected section ${i + 1}</span><b>Empty</b></div>
+        <div class="pt-ctx-row"><button class="chip on" data-ctx-c="add">+ add a photo here</button>${ov ? '<button class="chip" data-ctx-c="reset-cell">↔ reset size</button>' : ''}<span style="flex:1"></span><button class="chip" data-ctx-c="done">done</button></div>`;
+      return;
+    }
+    box.innerHTML = `
+      <div class="pt-ctx-head"><span class="mono">Selected photo · section ${i + 1}</span><b title="${esc(p.name)}">${esc(p.name)}</b></div>
+      <label class="pt-range"><span class="mono">Zoom</span><input type="range" data-ctx-zoom min="100" max="400" value="${Math.round(c.zoom * 100)}" aria-label="Zoom photo inside its section"><output>${Math.round(c.zoom * 100)}%</output></label>
+      <div class="pt-ctx-row" role="group" aria-label="Move the crop">
+        <span class="mono pt-ctx-label">Crop</span>
+        <button class="chip" data-ctx-c="crop-l" aria-label="Show more of the left">◀</button><button class="chip" data-ctx-c="crop-u" aria-label="Show more of the top">▲</button><button class="chip" data-ctx-c="crop-d" aria-label="Show more of the bottom">▼</button><button class="chip" data-ctx-c="crop-r" aria-label="Show more of the right">▶</button>
+      </div>
+      <div class="pt-ctx-row" role="group" aria-label="Order and placement">
+        <button class="chip" data-ctx-c="up" aria-label="Move to previous section">↑ prev</button><button class="chip" data-ctx-c="down" aria-label="Move to next section">↓ next</button>
+        <button class="chip" data-ctx-c="swap">⇄ swap…</button><button class="chip" data-ctx-c="replace">replace</button>${ov ? '<button class="chip" data-ctx-c="reset-cell">↔ reset size</button>' : ''}
+      </div>
+      <div class="pt-ctx-row"><button class="chip pt-danger" data-ctx-c="clear">clear section</button><span style="flex:1"></span><button class="chip" data-ctx-c="done">done</button></div>`;
+  }
+  $('[data-context]').addEventListener('click', (e) => {
+    const c = e.target.closest('[data-ctx-c]'), t = e.target.closest('[data-ctx-t]');
+    if (c) cellAction(c.dataset.ctxC); else if (t) textAction(t.dataset.ctxT);
+  });
+  $('[data-context]').addEventListener('input', (e) => {
+    const z = e.target.closest('[data-ctx-zoom]'); if (!z || state.ui.selected === null) return;
+    coalesce('zoom:' + state.ui.selected); state.cells[state.ui.selected].zoom = +z.value / 100; z.nextElementSibling.textContent = `${z.value}%`; redraw();
+  });
+  $('[data-context]').addEventListener('change', (e) => { if (e.target.closest('[data-ctx-zoom]')) { history.end(state); updateExport(); } });
+
+  /* ---------- history helpers ---------- */
   const coalesceTimers = {};
   function coalesce(key, ms = 600) {
     history.begin(state);
     clearTimeout(coalesceTimers[key]);
     coalesceTimers[key] = setTimeout(() => { history.end(state); updateExport(); }, ms);
   }
-  // sync every control from state (after undo/redo or a draft restore)
   async function refreshAll() {
     $('[data-themes]').querySelectorAll('[data-theme]').forEach(b => b.classList.toggle('on', b.dataset.theme === state.themeId));
     $('[data-shapes]').querySelectorAll('[data-shape]').forEach(b => b.classList.toggle('on', b.dataset.shape === state.shapeId));
     $('[data-accent]').value = accentColor(state);
     $('[data-spacing]').value = state.spacing; $('[data-spacing-out]').textContent = state.spacing;
-    const hideBtn = $('[data-hide-all]');
-    hideBtn.textContent = state.ui.hideText ? 'show words' : 'photos only'; hideBtn.classList.toggle('on', state.ui.hideText);
+    renderHideAll();
     sizeCanvas();
     await ensureFonts(styledTheme(state));
     renderLayouts(); renderSlots(); afterChange();
@@ -509,15 +632,15 @@ export function viewCollage(app) {
     $('[data-combos]').innerHTML = COMBOS.map(c => {
       const p = PALETTES.find(x => x.id === c.palette), f = FONT_SETS.find(x => x.id === c.font);
       const on = st.palette?.id === p.id && st.font?.id === f.id;
-      return `<button class="pt-combo ${on ? 'on' : ''}" data-combo="${p.id}|${f.id}">${bar(p.stripes)}
+      return `<button class="pt-combo ${on ? 'on' : ''}" data-combo="${p.id}|${f.id}" aria-pressed="${on}">${bar(p.stripes)}
         <b style="font-family:'${f.display.family}';font-style:${f.display.italic ? 'italic' : 'normal'};font-weight:${f.display.weight}">${p.name}</b>
         <span style="font-family:'${f.body.family}'">${f.body.family}</span></button>`;
     }).join('');
     $('[data-palettes]').innerHTML = PALETTES.map(p =>
-      `<button class="pt-pal ${st.palette?.id === p.id ? 'on' : ''}" data-palette="${p.id}" title="${p.name}">${bar(p.stripes)}<span>${p.name}</span></button>`).join('');
+      `<button class="pt-pal ${st.palette?.id === p.id ? 'on' : ''}" data-palette="${p.id}" title="${p.name}" aria-pressed="${st.palette?.id === p.id}">${bar(p.stripes)}<span>${p.name}</span></button>`).join('');
     const imgs = state.photos.map(imagePalette);
     $('[data-imgpal]').innerHTML = imgs.length
-      ? imgs.map(p => `<button class="pt-imgpal ${st.palette?.id === p.id ? 'on' : ''}" data-imgpalette="${p.id}" title="${esc(p.name)}">${bar(p.stripes)}<canvas width="72" height="46" data-photo="${p.id.slice(4)}"></canvas></button>`).join('')
+      ? imgs.map(p => `<button class="pt-imgpal ${st.palette?.id === p.id ? 'on' : ''}" data-imgpalette="${p.id}" title="${esc(p.name)}" aria-label="Palette from ${esc(p.name)}" aria-pressed="${st.palette?.id === p.id}">${bar(p.stripes)}<canvas width="72" height="46" data-photo="${p.id.slice(4)}"></canvas></button>`).join('')
       : '<span class="pt-tray-empty">Add photos to get palettes drawn from them.</span>';
     $('[data-imgpal]').querySelectorAll('canvas[data-photo]').forEach(c => {
       const p = photoById(state, +c.dataset.photo); if (!p) return;
@@ -525,10 +648,10 @@ export function viewCollage(app) {
       cx.drawImage(p.bmp, (72 - p.bmp.width * k) / 2, (46 - p.bmp.height * k) / 2, p.bmp.width * k, p.bmp.height * k);
     });
     $('[data-fonts]').innerHTML = FONT_SETS.map(f =>
-      `<button class="pt-font ${st.font?.id === f.id ? 'on' : ''}" data-fontset="${f.id}">
+      `<button class="pt-font ${st.font?.id === f.id ? 'on' : ''}" data-fontset="${f.id}" aria-pressed="${st.font?.id === f.id}">
         <b style="font-family:'${f.display.family}';font-style:${f.display.italic ? 'italic' : 'normal'};font-weight:${f.display.weight}">${f.display.family}</b>
         <span style="font-family:'${f.body.family}'">${f.body.family}</span></button>`).join('');
-    FONT_SETS.forEach(f => ensureFonts({ font: f.display, body: f.body }));   // so the cards preview in their own faces
+    FONT_SETS.forEach(f => ensureFonts({ font: f.display, body: f.body }));
   }
   async function applyStyleChange() {
     await ensureFonts(styledTheme(state));
@@ -538,9 +661,7 @@ export function viewCollage(app) {
   $('[data-combos]').addEventListener('click', (e) => {
     const b = e.target.closest('[data-combo]'); if (!b) return;
     const [pid, fid] = b.dataset.combo.split('|');
-    commit();
-    state.style = { palette: PALETTES.find(p => p.id === pid), font: FONT_SETS.find(f => f.id === fid) };
-    state.accent = null; applyStyleChange();
+    commit(); state.style = { palette: PALETTES.find(p => p.id === pid), font: FONT_SETS.find(f => f.id === fid) }; state.accent = null; applyStyleChange();
   });
   $('[data-palettes]').addEventListener('click', (e) => {
     const b = e.target.closest('[data-palette]'); if (!b) return;
@@ -556,19 +677,40 @@ export function viewCollage(app) {
     commit(); state.style.font = FONT_SETS.find(f => f.id === b.dataset.fontset); applyStyleChange();
   });
   $('[data-style-reset]').addEventListener('click', () => { commit(); state.style = { palette: null, font: null }; state.accent = null; applyStyleChange(); });
+  $('[data-themes]').addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-theme]'); if (!btn) return;
+    setTheme(btn.dataset.theme);
+    $('[data-themes]').querySelectorAll('.pt-chip').forEach(b => b.classList.toggle('on', b === btn));
+    $('[data-accent]').value = accentColor(state);
+    await ensureFonts(styledTheme(state));
+    renderLayouts(); renderSlots(); afterChange();
+  });
+  $('[data-accent]').addEventListener('input', (e) => { coalesce('accent'); state.accent = e.target.value; renderLayouts(); redraw(); });
+  $('[data-accent-reset]').addEventListener('click', () => { commit(); state.accent = null; $('[data-accent]').value = accentColor(state); renderLayouts(); redraw(); });
 
+  /* ---------- layout panel ---------- */
+  function visibleLayouts() {
+    const f = state.ui.layoutFilter;
+    if (f === 'suggested') {
+      const sug = suggestedLayouts(state, state.photos.length);
+      if (!sug.some(l => l.id === state.layoutId)) sug.push(currentLayout(state));
+      return sug;
+    }
+    if (f === 'all') return LAYOUTS;
+    return LAYOUTS.filter(l => (l.group || 'classic') === f);
+  }
   function renderLayouts() {
     const box = $('[data-layouts]');
     const theme = styledTheme(state), shape = currentShape(state);
-    const btn = (l) => `
-      <button class="pt-layout-btn ${l.id === state.layoutId ? 'on' : ''}" data-layout="${l.id}" title="${l.desc}">
-        <canvas width="${Math.round(88 * (shape.ar >= 1 ? 1 : shape.ar))}" height="${Math.round(88 * (shape.ar >= 1 ? 1 / shape.ar : 1))}"></canvas>
+    const list = visibleLayouts();
+    layoutsFor = state.photos.length;
+    const n = state.photos.length;
+    box.innerHTML = (state.ui.layoutFilter === 'suggested' ? `<div class="pt-group mono">${n ? `Good fits for ${n} photo${n > 1 ? 's' : ''}` : 'Popular picks'} · <button class="pt-link" data-filter="all">view all ${LAYOUTS.length}</button></div>` : '') +
+      list.map(l => `
+      <button class="pt-layout-btn ${l.id === state.layoutId ? 'on' : ''}" data-layout="${l.id}" title="${l.desc}" aria-pressed="${l.id === state.layoutId}">
+        <canvas width="${Math.round(88 * (shape.ar >= 1 ? 1 : shape.ar))}" height="${Math.round(88 * (shape.ar >= 1 ? 1 / shape.ar : 1))}" aria-hidden="true"></canvas>
         <span>${theme.suggested.includes(l.id) ? '★ ' : ''}${l.name}</span>
-      </button>`;
-    box.innerHTML =
-      `<div class="pt-group mono">Moodboard</div>${LAYOUTS.filter(l => l.group === 'moodboard').map(btn).join('')}` +
-      `<div class="pt-group mono">Photos only</div>${LAYOUTS.filter(l => l.group === 'photos').map(btn).join('')}` +
-      `<div class="pt-group mono">Classic</div>${LAYOUTS.filter(l => !l.group).map(btn).join('')}`;
+      </button>`).join('');
     box.querySelectorAll('[data-layout]').forEach(btn => {
       const c = btn.querySelector('canvas'), cx = c.getContext('2d');
       const layout = LAYOUTS.find(l => l.id === btn.dataset.layout);
@@ -579,15 +721,33 @@ export function viewCollage(app) {
       const ink = isDark(theme.palette.bg) ? 'rgba(255,255,255,.28)' : 'rgba(0,0,0,.18)';
       g.cells.forEach(cell => {
         cx.save(); rotateTo(cx, cell);
-        cx.globalAlpha = 0.85;
-        cx.fillStyle = cell.type === 'photo' ? accentColor(state) : ink;
+        cx.globalAlpha = 0.85; cx.fillStyle = cell.type === 'photo' ? accentColor(state) : ink;
         cx.fillRect(cell.rect.x, cell.rect.y, cell.rect.w, cell.rect.h);
         cx.restore();
       });
-      btn.addEventListener('click', () => { setLayout(btn.dataset.layout); renderLayouts(); renderSlots(); renderThumbs(); updateExport(); redraw(); });
+      btn.addEventListener('click', () => { setLayout(btn.dataset.layout); renderLayouts(); renderSlots(); afterChange(); });
     });
+    app.querySelectorAll('[data-layout-filters] [data-filter]').forEach(b => b.classList.toggle('on', b.dataset.filter === state.ui.layoutFilter));
   }
+  app.addEventListener('click', (e) => {
+    const f = e.target.closest('[data-filter]'); if (!f || !f.closest('[data-panel="layout"]')) return;
+    state.ui.layoutFilter = f.dataset.filter; renderLayouts();
+  });
+  $('[data-shapes]').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-shape]'); if (!btn) return;
+    setShape(btn.dataset.shape);
+    $('[data-shapes]').querySelectorAll('.pt-chip').forEach(b => b.classList.toggle('on', b === btn));
+    sizeCanvas(); renderLayouts(); afterChange();
+  });
+  $('[data-layout-reset]').addEventListener('click', () => { commit(); clearCellOv(state, currentLayout(state)); renderLayouts(); afterChange(); });
+  $('[data-spacing]').addEventListener('input', (e) => { coalesce('spacing'); state.spacing = +e.target.value; $('[data-spacing-out]').textContent = state.spacing; redraw(); });
+  $('[data-spacing]').addEventListener('change', () => { history.end(state); renderLayouts(); updateExport(); });
 
+  /* ---------- text panel ---------- */
+  function renderHideAll() {
+    const b = $('[data-hide-all]');
+    b.textContent = state.ui.hideText ? 'turn words on' : 'words on'; b.classList.toggle('on', !state.ui.hideText); b.setAttribute('aria-checked', String(!state.ui.hideText));
+  }
   function renderSlots() {
     const theme = currentTheme(state);
     $('[data-slots]').innerHTML = slotsFor(theme, currentLayout(state)).map(s => {
@@ -598,8 +758,9 @@ export function viewCollage(app) {
           <input type="text" data-slot="${s.id}" value="${esc(slotText(state, s))}" maxlength="${s.style === 'numeral' ? 6 : 80}" placeholder="${esc(s.default)}">
         </label>
         <div class="pt-slot-actions">
-          <button class="chip ${ov.hidden ? '' : 'on'}" data-slot-toggle="${s.id}" title="${ov.hidden ? 'Show' : 'Hide'} this text">${ov.hidden ? 'show' : 'on'}</button>
-          <button class="chip" data-slot-reset="${s.id}" title="Reset position & size" ${changed ? '' : 'disabled'}>↺</button>
+          <button class="chip ${ov.hidden ? '' : 'on'}" data-slot-toggle="${s.id}" role="switch" aria-checked="${!ov.hidden}" aria-label="${s.label} ${ov.hidden ? 'hidden' : 'shown'}">${ov.hidden ? 'show' : 'on'}</button>
+          <button class="chip" data-slot-adjust="${s.id}" ${ov.hidden || state.ui.hideText ? 'disabled' : ''} aria-label="Adjust ${s.label} size and position">adjust</button>
+          <button class="chip" data-slot-reset="${s.id}" title="Reset position & size" aria-label="Reset ${s.label} position and size" ${changed ? '' : 'disabled'}>↺</button>
         </div>
       </div>`;
     }).join('');
@@ -610,63 +771,58 @@ export function viewCollage(app) {
     }));
   }
   $('[data-slots]').addEventListener('click', (e) => {
-    const t = e.target.closest('[data-slot-toggle]'), r = e.target.closest('[data-slot-reset]');
+    const t = e.target.closest('[data-slot-toggle]'), r = e.target.closest('[data-slot-reset]'), a = e.target.closest('[data-slot-adjust]');
+    if (a) { state.ui.selected = null; state.ui.selectedText = a.dataset.slotAdjust; redraw(); return; }
     if (t || r) commit();
     if (t) { setTextOv(state, t.dataset.slotToggle, { hidden: !textOv(state, t.dataset.slotToggle).hidden }); if (state.ui.selectedText === t.dataset.slotToggle) state.ui.selectedText = null; }
     else if (r) { delete state.textOv[r.dataset.slotReset]; }
     else return;
     renderSlots(); redraw();
   });
-  $('[data-layout-reset]').addEventListener('click', () => { commit(); clearCellOv(state, currentLayout(state)); renderLayouts(); afterChange(); });
-  $('[data-spacing]').addEventListener('input', (e) => { coalesce('spacing'); state.spacing = +e.target.value; $('[data-spacing-out]').textContent = state.spacing; redraw(); });
-  $('[data-spacing]').addEventListener('change', () => { history.end(state); renderLayouts(); updateExport(); });
-  $('[data-hide-all]').addEventListener('click', (e) => {
-    commit();
-    state.ui.hideText = !state.ui.hideText;
-    state.ui.selectedText = null;
-    e.currentTarget.textContent = state.ui.hideText ? 'show words' : 'photos only';
-    e.currentTarget.classList.toggle('on', state.ui.hideText);
-    renderLayouts(); afterChange();
+  $('[data-hide-all]').addEventListener('click', () => {
+    commit(); state.ui.hideText = !state.ui.hideText; state.ui.selectedText = null;
+    renderHideAll(); renderLayouts(); renderSlots(); afterChange();
   });
 
-  function renderThumbs() {
-    renderStyles();                       // image palettes follow the photo tray
-    const box = $('[data-thumbs]');
+  /* ---------- photos panel ---------- */
+  function renderPhotos() {
+    renderStyles();                       // image palettes follow the photos
+    const box = $('[data-photos]');
     box.innerHTML = '';
-    if (!state.photos.length) {
-      box.innerHTML = '<span class="pt-tray-empty">No photos yet — add some, click any empty cell, or </span><button class="chip" data-tray-samples>try sample photos</button>';
-      box.querySelector('[data-tray-samples]').addEventListener('click', useSamples);
-      return;
-    }
+    if (!state.photos.length) { box.innerHTML = '<p class="pt-tray-empty">No photos yet. Add some, or try the samples.</p>'; return; }
     state.photos.forEach(p => {
       const inCell = state.cells.findIndex(c => c.photoId === p.id);
+      const selected = inCell >= 0 && state.ui.selected === inCell;
       const el = document.createElement('button');
       el.type = 'button';
-      el.className = `pt-thumb ${inCell >= 0 ? 'placed' : ''}`;
-      el.title = inCell >= 0 ? `${p.name} — in section ${inCell + 1}. Click to move to the selected section.` : `${p.name} — not placed. Click to place.`;
-      el.setAttribute('aria-label', el.title);
-      const c = makeCanvas(64, 64), cx = c.getContext('2d');
-      const k = Math.max(64 / p.bmp.width, 64 / p.bmp.height);
-      cx.drawImage(p.bmp, (64 - p.bmp.width * k) / 2, (64 - p.bmp.height * k) / 2, p.bmp.width * k, p.bmp.height * k);
+      el.className = `pt-thumb ${inCell >= 0 ? 'placed' : ''} ${selected ? 'sel' : ''}`;
+      el.title = inCell >= 0 ? `${p.name} — section ${inCell + 1}. Click to select it.` : `${p.name} — not placed. Click to place it.`;
+      el.setAttribute('aria-label', el.title); el.setAttribute('aria-pressed', String(selected));
+      const c = makeCanvas(72, 72), cx = c.getContext('2d');
+      const k = Math.max(72 / p.bmp.width, 72 / p.bmp.height);
+      cx.drawImage(p.bmp, (72 - p.bmp.width * k) / 2, (72 - p.bmp.height * k) / 2, p.bmp.width * k, p.bmp.height * k);
       el.appendChild(c);
       if (inCell >= 0) { const b = document.createElement('i'); b.textContent = inCell + 1; el.appendChild(b); }
       const rm = document.createElement('span'); rm.className = 'pt-thumb-remove'; rm.setAttribute('role', 'button'); rm.tabIndex = 0;
       rm.textContent = '✕'; rm.title = `Remove ${p.name}`; rm.setAttribute('aria-label', rm.title);
-      rm.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); removePhoto(p.id); afterChange(); } });
-      rm.addEventListener('click', (e) => { e.stopPropagation(); removePhoto(p.id); afterChange(); });
+      const remove = (e) => { e.preventDefault(); e.stopPropagation(); removePhoto(p.id); if (state.ui.selected !== null && !state.cells[state.ui.selected]) deselect(); afterChange(); };
+      rm.addEventListener('click', remove);
+      rm.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') remove(e); });
       el.appendChild(rm);
       el.addEventListener('click', () => {
+        if (inCell >= 0) { state.ui.selectedText = null; state.ui.selected = inCell; afterChange(); return; }
         let idx = state.ui.selected;
         if (idx === null || !isPhotoCell(state, idx)) idx = firstEmptyPhotoCell(state);
         if (idx < 0) idx = photoCellIndices(state)[0];
         assignPhoto(idx, p.id);
-        state.ui.selected = idx;
+        state.ui.selected = idx; state.ui.selectedText = null;
         afterChange();
       });
       box.appendChild(el);
     });
   }
 
+  /* ---------- export bar ---------- */
   function updateExport() {
     const shape = currentShape(state);
     const presets = exportPresets(shape);
@@ -690,20 +846,25 @@ export function viewCollage(app) {
         (r.reduced ? ` · rendered below the requested ${r.requested.w} × ${r.requested.h} because this device ran out of canvas memory.` : '');
     } else done.hidden = true;
   }
-
-  function renderEmpty() {
-    $('[data-empty]').hidden = state.photos.length > 0 || !$('[data-draft]').hidden;
+  function renderEmpty() { $('[data-empty]').hidden = state.photos.length > 0 || !$('[data-draft]').hidden; }
+  let layoutsFor = -1;                                    // photo count the layout list was built for
+  function afterChange() {
+    renderPhotos(); updateExport(); renderEmpty();
+    if (state.ui.layoutFilter === 'suggested' && layoutsFor !== state.photos.length) renderLayouts();
+    redraw();
   }
-  function afterChange() { renderThumbs(); updateExport(); renderEmpty(); redraw(); }
   async function useSamples() {
     $('[data-hint]').textContent = 'Loading sample photos…';
     const files = await loadSamplePhotos();
     if (files.length) { commit(); await addPhotos(files); }
-    $('[data-hint]').textContent = files.length ? 'Sample photos placed — drag a photo to reposition · scroll or pinch to zoom · click a photo for more controls' : 'Sample photos could not be loaded.';
+    $('[data-hint]').textContent = files.length ? `Sample photos placed — ${HINT_DEFAULT}` : 'Sample photos could not be loaded.';
     afterChange();
   }
   $('[data-empty-add]').addEventListener('click', () => { fileTarget = null; fileInput.click(); });
   $('[data-empty-samples]').addEventListener('click', useSamples);
+  $('[data-samples]').addEventListener('click', useSamples);
+  $('[data-add]').addEventListener('click', () => { fileTarget = null; fileInput.click(); });
+  $('[data-add-bottom]').addEventListener('click', () => { fileTarget = null; fileInput.click(); });
 
   /* ---------- section handles (resize / move) ---------- */
   const HANDLE_R = 7;
@@ -774,7 +935,6 @@ export function viewCollage(app) {
     }
     return -1;
   }
-
   const pointers = new Map();
   const pos = (e) => { const b = canvas.getBoundingClientRect(); return { x: e.clientX - b.left, y: e.clientY - b.top }; };
 
@@ -803,7 +963,7 @@ export function viewCollage(app) {
     if (state.ui.swapFrom !== null) {
       swapCells(state.ui.swapFrom, i);
       state.ui.selected = i; state.ui.swapFrom = null;
-      $('[data-hint]').textContent = 'Swapped.';
+      $('[data-hint]').textContent = `Swapped. ${HINT_DEFAULT}`;
       afterChange();
       return;
     }
@@ -819,7 +979,6 @@ export function viewCollage(app) {
     state.ui.selected = i;
     redraw();
   });
-
   canvas.addEventListener('pointermove', (e) => {
     if (!pointers.has(e.pointerId)) return;
     const pt = pos(e);
@@ -845,7 +1004,6 @@ export function viewCollage(app) {
     if (drag.overY > 0) c.panY = Math.min(1, Math.max(0, drag.panY - ly / drag.overY));
     redraw();
   });
-
   const endPointer = (e) => {
     pointers.delete(e.pointerId);
     if ((cellDrag || textDrag || drag || pinch) && pointers.size === 0) history.end(state);
@@ -856,7 +1014,6 @@ export function viewCollage(app) {
   };
   canvas.addEventListener('pointerup', endPointer);
   canvas.addEventListener('pointercancel', endPointer);
-
   canvas.addEventListener('wheel', (e) => {
     const pt = pos(e);
     const i = hitTest(pt.x, pt.y);
@@ -868,34 +1025,10 @@ export function viewCollage(app) {
     state.ui.selected = i;
     redraw(); updateExport();
   }, { passive: false });
-
-  /* ---------- toolbar ---------- */
-  toolbar.addEventListener('click', (e) => {
-    const act = e.target.closest('[data-act]')?.dataset.act;
-    const i = state.ui.selected;
-    if (!act || i === null) return;
-    const c = state.cells[i] || {};
-    if (['zoom-in', 'zoom-out', 'reset-cell'].includes(act)) commit();
-    switch (act) {
-      case 'zoom-in': c.zoom = Math.min(4, c.zoom * 1.15); break;
-      case 'zoom-out': c.zoom = Math.max(1, c.zoom / 1.15); break;
-      case 'up': { const ps = photoCellIndices(state), k = ps.indexOf(i); if (k > 0) { swapCells(i, ps[k - 1]); state.ui.selected = ps[k - 1]; } break; }
-      case 'down': { const ps = photoCellIndices(state), k = ps.indexOf(i); if (k < ps.length - 1) { swapCells(i, ps[k + 1]); state.ui.selected = ps[k + 1]; } break; }
-      case 'swap': state.ui.swapFrom = i; $('[data-hint]').textContent = 'Swap mode — click the cell to swap with (click the same cell to cancel).'; break;
-      case 'replace': case 'add': fileTarget = i; fileInput.click(); break;
-      case 'clear': clearCell(i); break;
-      case 'reset-cell': clearCellOv(state, currentLayout(state), i); renderLayouts(); break;
-      case 'done': deselect(); break;
-    }
-    afterChange();
-  });
-
-  // tapping anywhere outside the collage, or pressing Escape, puts the controls away
-  function deselect() { state.ui.selected = null; state.ui.selectedText = null; state.ui.swapFrom = null; }
-  stage.addEventListener('pointerdown', (e) => { if (!wrap.contains(e.target)) { deselect(); redraw(); } });
+  stage.addEventListener('pointerdown', (e) => { if (!wrap.contains(e.target) && !e.target.closest('.pt-draft, .pt-empty')) { deselect(); redraw(); } });
   const onKey = (e) => {
-    if (!document.body.contains(canvas)) { document.removeEventListener('keydown', onKey); return; }   // view was replaced
-    const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName);
+    if (!document.body.contains(canvas)) { document.removeEventListener('keydown', onKey); return; }
+    const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) && e.target.type !== 'range';
     if (e.key === 'Escape' && (state.ui.selected !== null || state.ui.selectedText)) { deselect(); redraw(); return; }
     if (typing) return;
     const mod = e.metaKey || e.ctrlKey;
@@ -904,7 +1037,7 @@ export function viewCollage(app) {
   };
   document.addEventListener('keydown', onKey);
 
-  /* ---------- file input / tray ---------- */
+  /* ---------- files ---------- */
   fileInput.addEventListener('change', async () => {
     const files = [...fileInput.files];
     fileInput.value = '';
@@ -913,11 +1046,9 @@ export function viewCollage(app) {
     commit();
     await addPhotos(files, fileTarget);
     fileTarget = null;
-    $('[data-hint]').textContent = 'Drag a photo to reposition · scroll or pinch to zoom · click a photo for more controls';
+    $('[data-hint]').textContent = HINT_DEFAULT;
     afterChange();
   });
-  $('[data-add]').addEventListener('click', () => { fileTarget = null; fileInput.click(); });
-
   wrap.addEventListener('dragover', (e) => { e.preventDefault(); wrap.classList.add('drop'); });
   wrap.addEventListener('dragleave', () => wrap.classList.remove('drop'));
   wrap.addEventListener('drop', async (e) => {
@@ -929,32 +1060,14 @@ export function viewCollage(app) {
     afterChange();
   });
 
-  /* ---------- theme / shape / accent ---------- */
-  $('[data-themes]').addEventListener('click', async (e) => {
-    const btn = e.target.closest('[data-theme]'); if (!btn) return;
-    setTheme(btn.dataset.theme);
-    $('[data-themes]').querySelectorAll('.pt-chip').forEach(b => b.classList.toggle('on', b === btn));
-    $('[data-accent]').value = accentColor(state);
-    await ensureFonts(styledTheme(state));
-    renderLayouts(); renderSlots(); afterChange();
-  });
-  $('[data-shapes]').addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-shape]'); if (!btn) return;
-    setShape(btn.dataset.shape);
-    $('[data-shapes]').querySelectorAll('.pt-chip').forEach(b => b.classList.toggle('on', b === btn));
-    sizeCanvas(); renderLayouts(); afterChange();
-  });
-  $('[data-accent]').addEventListener('input', (e) => { coalesce('accent'); state.accent = e.target.value; renderLayouts(); redraw(); });
-  $('[data-accent-reset]').addEventListener('click', () => { commit(); state.accent = null; $('[data-accent]').value = accentColor(state); renderLayouts(); redraw(); });
-
-  /* ---------- export ---------- */
+  /* ---------- export / undo / new ---------- */
   $('[data-preset]').addEventListener('change', (e) => { state.ui.preset = e.target.value; updateExport(); redraw(); });
   $('[data-format]').addEventListener('change', (e) => { state.ui.format = e.target.value; });
   $('[data-undo]').addEventListener('click', doUndo);
   $('[data-redo]').addEventListener('click', doRedo);
   $('[data-new]').addEventListener('click', () => {
     if (hasContent(state) && !confirm('Discard this collage and start a new one?')) return;
-    resetAll(); discardDraft(); draft.lastSaved = null; renderSaveStatus(); renderSlots(); afterChange();
+    resetAll(); discardDraft(); draft.lastSaved = null; renderSaveStatus(); renderHideAll(); renderLayouts(); renderSlots(); afterChange();
   });
   $('[data-download]').addEventListener('click', async (e) => {
     const btn = e.currentTarget, status = $('[data-export-status]'), error = $('[data-export-error]');
@@ -981,6 +1094,7 @@ export function viewCollage(app) {
 
   /* ---------- draft recovery ---------- */
   const banner = $('[data-draft]');
+  const hasDraftContent = (doc) => doc && (doc.photos?.length || Object.keys(doc.texts || {}).length);
   async function offerDraft() {
     if (hasContent(state)) { draft.enabled = true; return; }
     let found = null;
@@ -991,7 +1105,6 @@ export function viewCollage(app) {
     banner.hidden = false; renderEmpty();
     $('[data-draft-restore]').focus();
   }
-  const hasDraftContent = (doc) => doc && (doc.photos?.length || Object.keys(doc.texts || {}).length);
   async function restoreDraft() {
     banner.hidden = true;
     $('[data-hint]').textContent = 'Restoring your collage…';
@@ -1008,19 +1121,20 @@ export function viewCollage(app) {
       }
     }
     draft.enabled = true; draft.lastSaved = found ? found.doc.savedAt : null;
-    $('[data-hint]').textContent = 'Drag a photo to reposition · scroll or pinch to zoom · click a photo for more controls';
+    $('[data-hint]').textContent = HINT_DEFAULT;
     await refreshAll(); renderSaveStatus();
   }
   $('[data-draft-restore]').addEventListener('click', restoreDraft);
   $('[data-draft-discard]').addEventListener('click', () => { banner.hidden = true; discardDraft(); draft.enabled = true; renderEmpty(); });
 
   /* ---------- boot ---------- */
-  const ro = new ResizeObserver(() => requestAnimationFrame(() => { sizeCanvas(); redraw(); }));
+  const ro = new ResizeObserver(() => (document.hidden ? setTimeout : requestAnimationFrame)(() => { sizeCanvas(); redraw(); }));   // rAF is paused in hidden tabs
   ro.observe(stage);
   window.addEventListener('resize', sizeWorkspace);
   sizeWorkspace();
-  sizeCanvas();
-  renderLayouts(); renderSlots(); renderThumbs(); updateExport();
+  if (!isDesktop()) side.classList.add('collapsed');
+  showTab(state.ui.tab, { keep: true });
+  renderLayouts(); renderSlots(); renderPhotos(); updateExport();
   ensureFonts(styledTheme(state)).then(() => { renderLayouts(); redraw(); });
   renderSaveStatus(); renderEmpty();
   draw();
