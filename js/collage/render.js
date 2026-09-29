@@ -8,7 +8,7 @@
 // ============================================================
 
 import { DEFAULT_BODY } from '../data/collage.js';
-import { slotText, textOv, textVisible, slotsFor, fitPhoto, accentColor, photoById } from './core.js';
+import { slotText, textOv, textVisible, slotsFor, fitPhoto, accentColor, photoById, textStyle, textFont } from './core.js';
 
 /* ---------------- colour helpers ---------------- */
 export const isDark = (hex) => {
@@ -82,12 +82,19 @@ export function fontStr(theme, size, kind) {
   const f = theme.font;
   return `${f.italic ? 'italic ' : ''}${f.weight} ${size}px "${f.family}", serif`;
 }
-// shrink font size until the line fits; deterministic across scales
-function fitFont(ctx, text, theme, size, kind, maxW) {
+// shrink font size until the line fits; deterministic across scales.
+// With (s, id) the text's own font choice is used for measuring.
+function fitFont(ctx, text, theme, size, kind, maxW, s = null, id = null, o = {}) {
+  const f = (k) => (s && id) ? textFont(theme, textOv(s, id), k, kind, o) : fontStr(theme, k, kind);
   let k = size;
-  ctx.font = fontStr(theme, k, kind);
-  while (k > size * 0.35 && ctx.measureText(text).width > maxW) { k *= 0.94; ctx.font = fontStr(theme, k, kind); }
+  ctx.font = f(k);
+  while (k > size * 0.35 && ctx.measureText(text).width > maxW) { k *= 0.94; ctx.font = f(k); }
   return k;
+}
+// underline under a run of text drawn with the current fillStyle / alpha
+function underline(ctx, x, y, w, size, align) {
+  const x0 = align === 'center' ? x - w / 2 : align === 'right' ? x - w : x;
+  ctx.fillRect(x0, y + size * 0.1, w, Math.max(1, size * 0.055));
 }
 function setTracking(ctx, px) { if ('letterSpacing' in ctx) ctx.letterSpacing = `${px}px`; }
 function wrapLines(ctx, text, maxW) {
@@ -156,17 +163,19 @@ function drawLine(s, ctx, g, id, text, x, y, size, kind, o = {}) {
   size *= ov.scale;
   ctx.save();
   ctx.translate(ov.dx * g.W, ov.dy * g.H);
-  ctx.font = o.italic ? `italic 400 ${size}px "${(g.theme.body || DEFAULT_BODY).family}", sans-serif` : fontStr(g.theme, size, kind);
+  const st = textStyle(g.theme, ov, kind, o);
+  ctx.font = textFont(g.theme, ov, size, kind, o);
   if (o.tracking) setTracking(ctx, o.tracking * size);
   if (o.shadow) { ctx.shadowColor = 'rgba(0,0,0,.55)'; ctx.shadowBlur = g.u * 0.012; }
   ctx.textAlign = o.align || 'center'; ctx.textBaseline = 'alphabetic';
-  ctx.fillStyle = o.color || g.theme.palette.text; ctx.globalAlpha = o.alpha ?? 1;
+  ctx.fillStyle = st.color || o.color || g.theme.palette.text; ctx.globalAlpha = o.alpha ?? 1;
   ctx.fillText(text, x, y);
   const w = ctx.measureText(text).width;
+  if (st.underline) underline(ctx, x, y, w, size, o.align || 'center');
   if (o.tracking) setTracking(ctx, 0);
   ctx.restore();
   const bx = (o.align || 'center') === 'center' ? x - w / 2 : o.align === 'right' ? x - w : x;
-  const box = { x: bx + ov.dx * g.W, y: y - size * 0.82 + ov.dy * g.H, w, h: size * 1.05 };
+  const box = { x: bx + ov.dx * g.W, y: y - size * 0.82 + ov.dy * g.H, w, h: size * 1.05, style: st };
   g.textBoxes[id] = box;
   return box;
 }
@@ -260,11 +269,11 @@ function drawTextCell(s, ctx, g, i) {
   switch (def.style) {
     case 'title': {
       const [a, b] = vals;
-      const size = fitFont(ctx, a, theme, Math.min(r.h * (b ? 0.34 : 0.4), r.w * 0.16), 'display', maxW);
+      const size = fitFont(ctx, a, theme, Math.min(r.h * (b ? 0.34 : 0.4), r.w * 0.16), 'display', maxW, s, ids[0]);
       drawLine(s, ctx, g, ids[0], a, ax, r.y + r.h * (b ? 0.5 : 0.6), size, 'display', { align, color: ink });
       if (b) {
         const up = b.toUpperCase();
-        const s2 = fitFont(ctx, up, theme, Math.min(r.h * 0.11, size * 0.4), 'body', maxW / 1.3);
+        const s2 = fitFont(ctx, up, theme, Math.min(r.h * 0.11, size * 0.4), 'body', maxW / 1.3, s, ids[1]);
         drawLine(s, ctx, g, ids[1], up, ax, r.y + r.h * 0.72, s2, 'body', { align, color: ink, alpha: 0.85, tracking: 0.28 });
       }
       break;
@@ -275,25 +284,31 @@ function drawTextCell(s, ctx, g, i) {
       const size = Math.min(r.h * 0.1, r.w * 0.085) * ov.scale;
       ctx.save();
       ctx.translate(ov.dx * g.W, ov.dy * g.H);
-      ctx.font = `italic 400 ${size}px "${(theme.body || DEFAULT_BODY).family}", sans-serif`;
-      ctx.textAlign = align; ctx.textBaseline = 'alphabetic'; ctx.fillStyle = ink;
+      const st = textStyle(theme, ov, 'body', { italic: true });
+      ctx.font = textFont(theme, ov, size, 'body', { italic: true });
+      ctx.textAlign = align; ctx.textBaseline = 'alphabetic'; ctx.fillStyle = st.color || ink;
       const lines = wrapLines(ctx, vals[0], maxW).slice(0, 6);
       const lh = size * 1.35, y0 = r.y + r.h / 2 - (lines.length - 1) * lh / 2 + size * 0.35;
       let wMax = 0;
-      lines.forEach((ln, k) => { ctx.fillText(ln, ax, y0 + k * lh); wMax = Math.max(wMax, ctx.measureText(ln).width); });
+      lines.forEach((ln, k) => {
+        const lw = ctx.measureText(ln).width;
+        ctx.fillText(ln, ax, y0 + k * lh);
+        if (st.underline) underline(ctx, ax, y0 + k * lh, lw, size, align);
+        wMax = Math.max(wMax, lw);
+      });
       ctx.restore();
       const bx = align === 'left' ? ax : ax - wMax / 2;
-      g.textBoxes[ids[0]] = { x: bx + ov.dx * g.W, y: y0 - size * 0.85 + ov.dy * g.H, w: wMax, h: (lines.length - 1) * lh + size * 1.1 };
+      g.textBoxes[ids[0]] = { x: bx + ov.dx * g.W, y: y0 - size * 0.85 + ov.dy * g.H, w: wMax, h: (lines.length - 1) * lh + size * 1.1, style: st };
       break;
     }
     case 'big': {
-      const size = fitFont(ctx, vals[0], theme, r.h * 0.82, 'display', r.w * 0.9);
+      const size = fitFont(ctx, vals[0], theme, r.h * 0.82, 'display', r.w * 0.9, s, ids[0]);
       drawLine(s, ctx, g, ids[0], vals[0], ax, r.y + r.h / 2 + size * 0.36, size, 'display', { align, color: ink });
       break;
     }
     case 'label': {
       const t = vals[0].toUpperCase();
-      const size = fitFont(ctx, t, theme, Math.min(r.h * 0.6, u * 0.04), 'body', maxW / 1.3);
+      const size = fitFont(ctx, t, theme, Math.min(r.h * 0.6, u * 0.04), 'body', maxW / 1.3, s, ids[0]);
       drawLine(s, ctx, g, ids[0], t, ax, r.y + r.h / 2 + size * 0.36, size, 'body',
         { align, tracking: 0.3, color: def.bg === 'none' ? theme.palette.mat : ink, shadow: def.bg === 'none' });
       break;
@@ -347,18 +362,21 @@ function drawCaption(s, ctx, g, cell) {
   const size = Math.max(9, u * 0.026) * ov.scale;
   ctx.save();
   ctx.translate(ov.dx * g.W, ov.dy * g.H);
-  ctx.font = `400 ${size}px "${(theme.body || DEFAULT_BODY).family}", sans-serif`;
+  const st = textStyle(theme, ov, 'body');
+  ctx.font = textFont(theme, ov, size, 'body');
   setTracking(ctx, size * 0.32);
   const tw = ctx.measureText(text).width, padX = size * 1.2, h = size * 2.1;
   const x = p.x + p.w / 2 - (tw + 2 * padX) / 2, y = p.y + p.h / 2 - h / 2;
   ctx.fillStyle = theme.palette.mat; ctx.globalAlpha = 0.92;
   ctx.fillRect(x, y, tw + 2 * padX, h);
-  ctx.globalAlpha = 1; ctx.fillStyle = inkOn(theme.palette.mat);
+  ctx.globalAlpha = 1; ctx.fillStyle = st.color || inkOn(theme.palette.mat);
   ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-  ctx.fillText(text, x + padX, y + h / 2 + size * 0.05);
+  const ty = y + h / 2 + size * 0.05;
+  ctx.fillText(text, x + padX, ty);
+  if (st.underline) underline(ctx, x + padX, ty + size * 0.32, tw, size, 'left');
   setTracking(ctx, 0);
   ctx.restore();
-  g.textBoxes[slot.id] = { x: x + ov.dx * g.W, y: y + ov.dy * g.H, w: tw + 2 * padX, h };
+  g.textBoxes[slot.id] = { x: x + ov.dx * g.W, y: y + ov.dy * g.H, w: tw + 2 * padX, h, style: st };
 }
 
 function drawTape(ctx, g, cell) {
@@ -461,17 +479,17 @@ function drawTextBand(s, ctx, g) {
   const numeral = val(byStyle.numeral), headline = val(byStyle.headline), subline = val(byStyle.subline);
   const padX = band.w * 0.03;
   if (numeral) {
-    const nSize = fitFont(ctx, numeral, theme, band.h * 0.8, 'display', band.w * 0.4);
+    const nSize = fitFont(ctx, numeral, theme, band.h * 0.8, 'display', band.w * 0.4, s, byStyle.numeral.id);
     const nw = ctx.measureText(numeral).width;
     drawLine(s, ctx, g, byStyle.numeral.id, numeral, band.x + padX, band.y + band.h * 0.5 + nSize * 0.36, nSize, 'display', { align: 'left', color: accentColor(s) });
     const tx = band.x + padX + nw + band.h * 0.22;
     const avail = band.x + band.w - padX - tx;
-    if (headline) drawLine(s, ctx, g, byStyle.headline.id, headline, tx, band.y + band.h * 0.5, fitFont(ctx, headline, theme, band.h * 0.3, 'display', avail), 'display', { align: 'left' });
-    if (subline) drawLine(s, ctx, g, byStyle.subline.id, subline, tx, band.y + band.h * 0.73, fitFont(ctx, subline, theme, band.h * 0.13, 'body', avail), 'body', { align: 'left', alpha: 0.8 });
+    if (headline) drawLine(s, ctx, g, byStyle.headline.id, headline, tx, band.y + band.h * 0.5, fitFont(ctx, headline, theme, band.h * 0.3, 'display', avail, s, byStyle.headline.id), 'display', { align: 'left' });
+    if (subline) drawLine(s, ctx, g, byStyle.subline.id, subline, tx, band.y + band.h * 0.73, fitFont(ctx, subline, theme, band.h * 0.13, 'body', avail, s, byStyle.subline.id), 'body', { align: 'left', alpha: 0.8 });
   } else {
     const cx = band.x + band.w / 2, avail = band.w - 2 * padX;
-    if (headline) drawLine(s, ctx, g, byStyle.headline.id, headline, cx, band.y + band.h * 0.55, fitFont(ctx, headline, theme, band.h * 0.4, 'display', avail), 'display');
-    if (subline) drawLine(s, ctx, g, byStyle.subline.id, subline, cx, band.y + band.h * 0.82, fitFont(ctx, subline, theme, band.h * 0.14, 'body', avail), 'body', { alpha: 0.8 });
+    if (headline) drawLine(s, ctx, g, byStyle.headline.id, headline, cx, band.y + band.h * 0.55, fitFont(ctx, headline, theme, band.h * 0.4, 'display', avail, s, byStyle.headline.id), 'display');
+    if (subline) drawLine(s, ctx, g, byStyle.subline.id, subline, cx, band.y + band.h * 0.82, fitFont(ctx, subline, theme, band.h * 0.14, 'body', avail, s, byStyle.subline.id), 'body', { alpha: 0.8 });
   }
 }
 

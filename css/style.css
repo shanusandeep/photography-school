@@ -942,3 +942,12 @@ main.pt-full .view { animation: none; }
   .gate-card .filmstrip img.ph { height: 130px; }
   .gate-card > *:not(.filmstrip) { margin-left: 1.2rem; margin-right: 1.2rem; }
 }
+
+/* per-text formatting */
+.pt-ctx-font { display: grid; grid-template-columns: 52px 1fr; align-items: center; gap: .5rem; margin: .1rem 0 .35rem; }
+.pt-ctx-font .mono { color: var(--paper-faint); }
+.pt-ctx-font select { width: 100%; padding: .45rem .55rem; background: var(--ink); color: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); font-family: var(--font-body); font-size: .86rem; min-height: 36px; }
+.pt-fmt { min-width: 36px; justify-content: center; font-size: .82rem; text-transform: none; letter-spacing: 0; }
+.pt-fmt b, .pt-fmt i, .pt-fmt u { font-family: Georgia, serif; font-size: .95rem; }
+.pt-ctx-color input[type="color"] { width: 36px; height: 30px; border: 1px solid var(--line); border-radius: 3px; background: none; padding: 0; cursor: pointer; vertical-align: middle; }
+.pt-toolbar [data-tact].on { background: var(--amber); color: var(--ink); }

@@ -198,6 +198,31 @@ export const FONT_SETS = [
   { id: 'young-hanken', name: 'Young Serif & Hanken', display: { family: 'Young Serif', param: 'wght@400', weight: 400, italic: false }, body: DEFAULT_BODY },
 ];
 
+// fonts offered for individual pieces of text; params request regular + bold (and
+// italics where the family has them) so B / I render as real faces, not synthesized
+export const TEXT_FONTS = [
+  { id: 'playfair',    family: 'Playfair Display',   group: 'Serif',  generic: 'serif',      param: 'ital,wght@0,400;0,700;1,400;1,700' },
+  { id: 'cormorant',   family: 'Cormorant Garamond', group: 'Serif',  generic: 'serif',      param: 'ital,wght@0,400;0,700;1,400;1,700' },
+  { id: 'eb-garamond', family: 'EB Garamond',        group: 'Serif',  generic: 'serif',      param: 'ital,wght@0,400;0,700;1,400;1,700' },
+  { id: 'dm-serif',    family: 'DM Serif Display',   group: 'Serif',  generic: 'serif',      param: 'ital@0;1' },
+  { id: 'young-serif', family: 'Young Serif',        group: 'Serif',  generic: 'serif',      param: 'wght@400' },
+  { id: 'arbutus',     family: 'Arbutus Slab',       group: 'Serif',  generic: 'serif',      param: 'wght@400' },
+  { id: 'montserrat',  family: 'Montserrat',         group: 'Sans',   generic: 'sans-serif', param: 'ital,wght@0,400;0,700;1,400;1,700' },
+  { id: 'lato',        family: 'Lato',               group: 'Sans',   generic: 'sans-serif', param: 'ital,wght@0,400;0,700;1,400;1,700' },
+  { id: 'raleway',     family: 'Raleway',            group: 'Sans',   generic: 'sans-serif', param: 'ital,wght@0,400;0,700;1,400;1,700' },
+  { id: 'dm-sans',     family: 'DM Sans',            group: 'Sans',   generic: 'sans-serif', param: 'ital,wght@0,400;0,700;1,400;1,700' },
+  { id: 'barlow',      family: 'Barlow',             group: 'Sans',   generic: 'sans-serif', param: 'ital,wght@0,400;0,700;1,400;1,700' },
+  { id: 'hanken',      family: 'Hanken Grotesk',     group: 'Sans',   generic: 'sans-serif', param: 'ital,wght@0,400;0,700;1,400;1,700' },
+  { id: 'quicksand',   family: 'Quicksand',          group: 'Sans',   generic: 'sans-serif', param: 'wght@400;700' },
+  { id: 'bebas',       family: 'Bebas Neue',         group: 'Display', generic: 'sans-serif', param: 'wght@400' },
+  { id: 'oswald',      family: 'Oswald',             group: 'Display', generic: 'sans-serif', param: 'wght@400;700' },
+  { id: 'abril',       family: 'Abril Fatface',      group: 'Display', generic: 'serif',     param: 'wght@400' },
+  { id: 'great-vibes', family: 'Great Vibes',        group: 'Script', generic: 'cursive',    param: 'wght@400' },
+  { id: 'dancing',     family: 'Dancing Script',     group: 'Script', generic: 'cursive',    param: 'wght@400;700' },
+  { id: 'caveat',      family: 'Caveat',             group: 'Script', generic: 'cursive',    param: 'wght@400;700' },
+  { id: 'pacifico',    family: 'Pacifico',           group: 'Script', generic: 'cursive',    param: 'wght@400' },
+];
+
 // curated palette + font pairings
 export const COMBOS = [
   { palette: 'arsenal', font: 'playfair-montserrat' }, { palette: 'roxborough', font: 'cormorant-quicksand' },

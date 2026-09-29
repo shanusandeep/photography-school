@@ -8,13 +8,13 @@
 // one at a time at export.
 // ============================================================
 
-import { SHAPES, LAYOUTS, THEMES, PALETTES, FONT_SETS, COMBOS, DEFAULT_BODY, exportPresets } from './data/collage.js';
+import { SHAPES, LAYOUTS, THEMES, PALETTES, FONT_SETS, COMBOS, DEFAULT_BODY, TEXT_FONTS, exportPresets } from './data/collage.js';
 import {
   createState, emptyCell, currentTheme, currentShape, currentLayout, photoById, hasContent, currentPreset as presetOf,
   styledTheme, accentColor, slotText, textOv, setTextOv, slotsFor, isPhotoCell, firstEmptyPhotoCell, photoCellIndices,
   cellDef, setCellOv, hasCellOv, clearCellOv, geometry as geometryOf, fitPhoto, cellQuality as cellQualityOf,
   setLayout as setLayoutOf, setTheme as setThemeOf, setShape as setShapeOf, swapCells as swapCellsOf, assignPhoto as assignPhotoOf,
-  clearCell as clearCellOf, removePhoto as removePhotoOf, placePhotos, resetDocument, History, serializeDraft, deserializeDraft, restore, suggestedLayouts,
+  clearCell as clearCellOf, removePhoto as removePhotoOf, placePhotos, resetDocument, History, serializeDraft, deserializeDraft, restore, suggestedLayouts, textStyle, fontsInUse,
 } from './collage/core.js';
 import { saveDraft, loadDraft, clearDraft, isQuotaError } from './collage/draft.js';
 import { drawBackground, drawCell, drawForeground, imagePalette as imagePaletteOf, isDark, rotateTo } from './collage/render.js';
@@ -41,19 +41,29 @@ window.addEventListener('beforeunload', (e) => {
    ============================================================ */
 const fontLoads = new Map();
 function loadFamily(family, param, spec) {
-  if (!fontLoads.has(family)) {
-    fontLoads.set(family, (async () => {
-      if (!document.getElementById(`gf-${family}`)) {
-        const link = document.createElement('link');
-        link.id = `gf-${family}`; link.rel = 'stylesheet';
+  const key = `${family}|${param}`;
+  if (!fontLoads.has(key)) {
+    fontLoads.set(key, (async () => {
+      const linkId = `gf-${key.replace(/[^a-z0-9]/gi, '-')}`;
+      let link = document.getElementById(linkId);
+      if (!link) {
+        link = document.createElement('link');
+        link.id = linkId; link.rel = 'stylesheet';
         link.href = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(family).replace(/%20/g, '+')}:${param}&display=swap`;
         document.head.appendChild(link);
       }
-      try { await document.fonts.load(spec); }
+      // the @font-face rules only exist once the stylesheet has arrived — fonts.load() before that matches nothing
+      if (!link.sheet) await new Promise(res => { link.addEventListener('load', res, { once: true }); link.addEventListener('error', res, { once: true }); setTimeout(res, 8000); });
+      try { await Promise.all([].concat(spec).map(x => document.fonts.load(x))); }
       catch { /* fall back to system font; still deterministic per device */ }
     })());
   }
-  return fontLoads.get(family);
+  return fontLoads.get(key);
+}
+// per-text font choices (and bold/italic faces of the theme's own fonts) must be loaded before rendering too
+function ensureTextFonts() {
+  return Promise.all(fontsInUse(state, styledTheme(state)).map(f =>
+    loadFamily(f.family, f.param, ['400', '700', 'italic 400', 'italic 700'].map(v => `${v} 40px "${f.family}"`))));
 }
 function ensureFonts(theme) {
   const { family, param, weight, italic } = theme.font;
@@ -142,6 +152,7 @@ function resetAll() {
 async function exportCollage(preset, format, onProgress = () => {}) {
   onProgress({ phase: 'fonts' });
   await ensureFonts(styledTheme(state));
+  await ensureTextFonts();
   const type = format === 'png' ? 'image/png' : 'image/jpeg';
   let result = null;
   for (const k of [1, 0.75, 0.5]) {
@@ -310,6 +321,10 @@ export function viewCollage(app) {
             <div class="pt-toolbar" data-text-toolbar hidden role="toolbar" aria-label="Selected text">
               <button data-tact="smaller" title="Smaller text" aria-label="Smaller text">A−</button>
               <button data-tact="bigger" title="Bigger text" aria-label="Bigger text">A+</button>
+              <span class="pt-sep"></span>
+              <button data-tact="bold" title="Bold" aria-label="Bold" aria-pressed="false"><b>B</b></button>
+              <button data-tact="italic" title="Italic" aria-label="Italic" aria-pressed="false"><i style="font-family:Georgia,serif">I</i></button>
+              <button data-tact="underline" title="Underline" aria-label="Underline" aria-pressed="false"><u>U</u></button>
               <span class="pt-sep"></span>
               <button data-tact="reset" title="Reset position & size" aria-label="Reset text position and size">↺ Reset</button>
               <button data-tact="hide" class="pt-danger" title="Remove this text" aria-label="Remove this text">Remove</button>
@@ -486,6 +501,10 @@ export function viewCollage(app) {
     const id = state.ui.selectedText, b = id && g.textBoxes[id];
     if (!b || textDrag) { textToolbar.hidden = true; return; }
     textToolbar.hidden = false;
+    const st = b.style || {};
+    [['bold', st.bold], ['italic', st.italic], ['underline', st.underline]].forEach(([k, on]) => {
+      const btn = textToolbar.querySelector(`[data-tact="${k}"]`); btn.setAttribute('aria-pressed', String(!!on)); btn.classList.toggle('on', !!on);
+    });
     const above = b.y - 52;
     textToolbar.style.left = `${Math.max(130, Math.min(cssW - 130, b.x + b.w / 2))}px`;
     textToolbar.style.top = `${above > 4 ? above : Math.min(cssH - 44, b.y + b.h + 14)}px`;
@@ -521,9 +540,15 @@ export function viewCollage(app) {
     const id = state.ui.selectedText; if (!id) return;
     const ov = textOv(state, id);
     if (act !== 'done') commit();
+    const st = (lastG && lastG.textBoxes[id] && lastG.textBoxes[id].style) || {};
     if (act === 'bigger') setTextOv(state, id, { scale: Math.min(3, ov.scale * 1.12) });
     else if (act === 'smaller') setTextOv(state, id, { scale: Math.max(0.4, ov.scale / 1.12) });
-    else if (act === 'reset') delete state.textOv[id];
+    else if (act === 'reset') setTextOv(state, id, { dx: 0, dy: 0, scale: 1 });              // position & size only; styling stays
+    else if (act === 'bold') setTextOv(state, id, { bold: !st.bold });
+    else if (act === 'italic') setTextOv(state, id, { italic: !st.italic });
+    else if (act === 'underline') setTextOv(state, id, { underline: !ov.underline });
+    else if (act === 'color-reset') setTextOv(state, id, { color: undefined });
+    else if (act === 'style-reset') setTextOv(state, id, { font: undefined, bold: undefined, italic: undefined, underline: undefined, color: undefined });
     else if (act === 'hide') { setTextOv(state, id, { hidden: true }); state.ui.selectedText = null; }
     else if (act === 'done') state.ui.selectedText = null;
     else if (act.startsWith('nudge-')) {
@@ -566,16 +591,33 @@ export function viewCollage(app) {
     if (tid) {
       const slot = slotsFor(currentTheme(state), currentLayout(state)).find(x => x.id === tid);
       const ov = textOv(state, tid);
+      const st = (g.textBoxes[tid] && g.textBoxes[tid].style) || textStyle(g.theme, ov);
+      if (box.contains(document.activeElement) && box.dataset.for === tid && document.activeElement.matches('select, input')) return;   // don't rebuild under an open picker
+      box.dataset.for = tid;
       box.hidden = false;
       box.innerHTML = `
         <div class="pt-ctx-head"><span class="mono">Selected text</span><b>${esc(slot ? slot.label : tid)}</b></div>
+        <label class="pt-ctx-font"><span class="mono">Font</span>
+          <select data-ctx-font aria-label="Font for this text">
+            <option value="" ${ov.font ? '' : 'selected'}>Theme font</option>
+            ${['Serif', 'Sans', 'Display', 'Script'].map(grp => `<optgroup label="${grp}">${TEXT_FONTS.filter(f => f.group === grp).map(f => `<option value="${f.id}" ${ov.font === f.id ? 'selected' : ''} style="font-family:'${f.family}'">${f.family}</option>`).join('')}</optgroup>`).join('')}
+          </select>
+        </label>
+        <div class="pt-ctx-row" role="group" aria-label="Text style">
+          <button class="chip pt-fmt ${st.bold ? 'on' : ''}" data-ctx-t="bold" aria-pressed="${!!st.bold}" aria-label="Bold"><b>B</b></button>
+          <button class="chip pt-fmt ${st.italic ? 'on' : ''}" data-ctx-t="italic" aria-pressed="${!!st.italic}" aria-label="Italic"><i style="font-family:Georgia,serif">I</i></button>
+          <button class="chip pt-fmt ${st.underline ? 'on' : ''}" data-ctx-t="underline" aria-pressed="${!!st.underline}" aria-label="Underline"><u>U</u></button>
+          <label class="pt-ctx-color"><span class="sr-only">Text colour</span><input type="color" data-ctx-color value="${st.color || (g.theme && g.theme.palette.text) || '#ffffff'}" aria-label="Text colour"></label>
+          ${st.color ? '<button class="chip" data-ctx-t="color-reset" aria-label="Reset text colour">auto colour</button>' : ''}
+          ${(ov.font || ov.bold !== undefined || ov.italic !== undefined || ov.underline || ov.color) ? '<button class="chip" data-ctx-t="style-reset">↺ style</button>' : ''}
+        </div>
         <div class="pt-ctx-row" role="group" aria-label="Text size">
           <button class="chip" data-ctx-t="smaller" aria-label="Smaller text">A−</button><button class="chip" data-ctx-t="bigger" aria-label="Bigger text">A+</button>
           <span class="mono pt-ctx-val">${Math.round(ov.scale * 100)}%</span>
         </div>
         <div class="pt-ctx-row" role="group" aria-label="Nudge position">
           <button class="chip" data-ctx-t="nudge-l" aria-label="Nudge left">◀</button><button class="chip" data-ctx-t="nudge-u" aria-label="Nudge up">▲</button><button class="chip" data-ctx-t="nudge-d" aria-label="Nudge down">▼</button><button class="chip" data-ctx-t="nudge-r" aria-label="Nudge right">▶</button>
-          <span style="flex:1"></span><button class="chip" data-ctx-t="reset">↺ reset</button>
+          <span style="flex:1"></span><button class="chip" data-ctx-t="reset" aria-label="Reset position and size">↺ position</button>
         </div>
         <div class="pt-ctx-row"><button class="chip pt-danger" data-ctx-t="hide">remove text</button><span style="flex:1"></span><button class="chip" data-ctx-t="done">done</button></div>`;
       return;
@@ -615,7 +657,20 @@ export function viewCollage(app) {
     const z = e.target.closest('[data-ctx-zoom]'); if (!z || state.ui.selected === null) return;
     coalesce('zoom:' + state.ui.selected); state.cells[state.ui.selected].zoom = +z.value / 100; z.nextElementSibling.textContent = `${z.value}%`; redraw();
   });
-  $('[data-context]').addEventListener('change', (e) => { if (e.target.closest('[data-ctx-zoom]')) { history.end(state); updateExport(); } });
+  $('[data-context]').addEventListener('change', async (e) => {
+    if (e.target.closest('[data-ctx-zoom]')) { history.end(state); updateExport(); return; }
+    const fsel = e.target.closest('[data-ctx-font]');
+    if (fsel && state.ui.selectedText) {
+      commit(); setTextOv(state, state.ui.selectedText, { font: fsel.value || undefined });
+      await ensureTextFonts(); fsel.blur(); redraw();
+      return;
+    }
+    if (e.target.closest('[data-ctx-color]')) { history.end(state); redraw(); }
+  });
+  $('[data-context]').addEventListener('input', (e) => {
+    const c = e.target.closest('[data-ctx-color]'); if (!c || !state.ui.selectedText) return;
+    coalesce('tcolor:' + state.ui.selectedText); setTextOv(state, state.ui.selectedText, { color: c.value }); redraw();
+  });
 
   /* ---------- history helpers ---------- */
   const coalesceTimers = {};
@@ -625,6 +680,7 @@ export function viewCollage(app) {
     coalesceTimers[key] = setTimeout(() => { history.end(state); updateExport(); }, ms);
   }
   async function refreshAll() {
+    await ensureTextFonts();
     $('[data-themes]').querySelectorAll('[data-theme]').forEach(b => b.classList.toggle('on', b.dataset.theme === state.themeId));
     $('[data-shapes]').querySelectorAll('[data-shape]').forEach(b => b.classList.toggle('on', b.dataset.shape === state.shapeId));
     $('[data-accent]').value = accentColor(state);
@@ -666,7 +722,7 @@ export function viewCollage(app) {
     FONT_SETS.forEach(f => ensureFonts({ font: f.display, body: f.body }));
   }
   async function applyStyleChange() {
-    await ensureFonts(styledTheme(state));
+    await ensureFonts(styledTheme(state)); ensureTextFonts().then(redraw);
     $('[data-accent]').value = accentColor(state);
     renderStyles(); renderLayouts(); redraw();
   }
@@ -787,7 +843,7 @@ export function viewCollage(app) {
     if (a) { state.ui.selected = null; state.ui.selectedText = a.dataset.slotAdjust; redraw(); return; }
     if (t || r) commit();
     if (t) { setTextOv(state, t.dataset.slotToggle, { hidden: !textOv(state, t.dataset.slotToggle).hidden }); if (state.ui.selectedText === t.dataset.slotToggle) state.ui.selectedText = null; }
-    else if (r) { delete state.textOv[r.dataset.slotReset]; }
+    else if (r) { setTextOv(state, r.dataset.slotReset, { dx: 0, dy: 0, scale: 1 }); }
     else return;
     renderSlots(); redraw();
   });
@@ -1151,6 +1207,7 @@ export function viewCollage(app) {
   showTab(state.ui.tab);
   renderLayouts(); renderSlots(); renderPhotos(); updateExport();
   ensureFonts(styledTheme(state)).then(() => { renderLayouts(); redraw(); });
+  ensureTextFonts().then(redraw);
   renderSaveStatus(); renderEmpty();
   draw();
   offerDraft();

@@ -6,7 +6,7 @@
 // UI module owns the singleton state and passes it in explicitly.
 // ============================================================
 
-import { SHAPES, LAYOUTS, THEMES, DEFAULT_BODY, exportPresets } from '../data/collage.js';
+import { SHAPES, LAYOUTS, THEMES, DEFAULT_BODY, TEXT_FONTS, exportPresets } from '../data/collage.js';
 
 export const emptyCell = () => ({ photoId: null, zoom: 1, panX: 0.5, panY: 0.5 });
 export const NO_OV = Object.freeze({ dx: 0, dy: 0, scale: 1, hidden: false });
@@ -61,6 +61,32 @@ export const slotText = (s, slot) => (s.texts[slot.id] !== undefined ? s.texts[s
 export const textOv = (s, id) => s.textOv[id] || NO_OV;
 export function setTextOv(s, id, patch) { s.textOv[id] = { ...textOv(s, id), ...patch }; }
 export const textVisible = (s, id) => !s.ui.hideText && !textOv(s, id).hidden;
+
+// effective typeface for one piece of text: the theme/style default for its role
+// ('display' headings, 'body' small text; o.italic for quotes), then the user's
+// per-text choices — font, bold, italic — layered on top
+export function textStyle(theme, ov = NO_OV, kind = 'display', o = {}) {
+  const pick = ov.font ? TEXT_FONTS.find(f => f.id === ov.font) : null;
+  const body = theme.body || DEFAULT_BODY;
+  let family, weight, italic, generic;
+  if (pick) { family = pick.family; weight = 400; italic = !!o.italic; generic = pick.generic; }
+  else if (kind === 'body') { family = body.family; weight = 400; italic = !!o.italic; generic = 'sans-serif'; }
+  else { family = theme.font.family; weight = theme.font.weight; italic = !!theme.font.italic || !!o.italic; generic = 'serif'; }
+  if (ov.bold !== undefined) weight = ov.bold ? 700 : 400;
+  if (ov.italic !== undefined) italic = !!ov.italic;
+  return { family, weight, italic, generic, bold: weight >= 600, underline: !!ov.underline, color: ov.color || null };
+}
+export function textFont(theme, ov, size, kind, o) {
+  const t = textStyle(theme, ov, kind, o);
+  return `${t.italic ? 'italic ' : ''}${t.weight} ${size}px "${t.family}", ${t.generic}`;
+}
+// every catalogue font a document needs loaded: chosen per-text fonts plus the theme's
+// own families (so bold/italic toggles on the default font have real faces)
+export function fontsInUse(s, theme) {
+  const ids = new Set(Object.values(s.textOv).map(o => o && o.font).filter(Boolean));
+  const fams = [theme.font.family, (theme.body || DEFAULT_BODY).family];
+  return TEXT_FONTS.filter(f => ids.has(f.id) || fams.includes(f.family));
+}
 export const slotsFor = (theme, layout) => [...theme.slots, ...(layout.slots || [])];
 
 // text cells claim slots in cell order, first non-empty unused candidate wins —
