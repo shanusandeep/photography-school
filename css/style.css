@@ -910,3 +910,16 @@ main.pt-full .view { animation: none; }
   .pt-bottom [data-undo], .pt-bottom [data-redo] { min-width: 38px; justify-content: center; font-size: .8rem; }
   .pt-bottom .pt-lbl { display: none; }
 }
+
+/* ---------------- account inside the ☰ menu on phones ---------------- */
+.nav-account { display: none; }
+@media (max-width: 720px) {
+  .topbar-auth { display: none; }
+  .nav-account { display: flex; align-items: center; justify-content: space-between; gap: .8rem; padding: .8rem 1.2rem; }
+  .nav-account-who { display: flex; align-items: center; gap: .6rem; min-width: 0; }
+  .nav-account-who b { display: block; font-size: .86rem; font-weight: 600; }
+  .nav-account-who small { display: block; font-size: .72rem; color: var(--paper-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .nav-account-btn { flex: none; min-height: 44px; padding: 0 1rem; background: none; border: 1px solid var(--amber); border-radius: var(--radius); color: var(--amber);
+    font-family: var(--font-mono); font-size: .72rem; letter-spacing: .14em; text-transform: uppercase; cursor: pointer; }
+  .nav-account:has([data-nav-signin]) .nav-account-btn { width: 100%; background: var(--amber); color: var(--ink); font-weight: 600; }
+}

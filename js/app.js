@@ -478,16 +478,16 @@ function route() {
     nav.classList.toggle('open', open);
     toggle.setAttribute('aria-expanded', String(open));
     toggle.setAttribute('aria-label', open ? 'Close menu' : 'Open menu');
-    if (open) nav.querySelector('a')?.focus();
+    if (open) nav.querySelector('a, button')?.focus();
     else if (focusToggle) toggle.focus();
   };
   toggle.addEventListener('click', () => setOpen(!isOpen()));
-  nav.addEventListener('click', (e) => { if (e.target.closest('a')) setOpen(false); });
+  nav.addEventListener('click', (e) => { if (e.target.closest('a, button')) setOpen(false); });
   document.addEventListener('keydown', (e) => {
     if (!isOpen()) return;
     if (e.key === 'Escape') { e.preventDefault(); setOpen(false, { focusToggle: true }); }
     if (e.key === 'Tab') {                                    // keep Tab inside the open menu
-      const items = [toggle, ...nav.querySelectorAll('a')];
+      const items = [toggle, ...[...nav.querySelectorAll('a, button')].filter(el => el.offsetParent !== null)];
       const first = items[0], last = items[items.length - 1];
       if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
       else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }

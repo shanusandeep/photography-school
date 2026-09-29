@@ -40,7 +40,15 @@ export async function initAuth() {
 }
 
 /* ---------------- topbar chip ---------------- */
+async function signOut() {
+  try { await api('/api/auth/logout', { method: 'POST' }); } catch {}
+  user = null;
+  renderChip();
+  emit('logout');
+}
+
 function renderChip() {
+  renderNavAccount();
   const slot = document.getElementById('topbarAuth');
   if (!slot) return;
   if (!user) {
@@ -61,12 +69,25 @@ function renderChip() {
   const menu = slot.querySelector('[data-menu]');
   slot.querySelector('[data-chip]').addEventListener('click', (e) => { e.stopPropagation(); menu.hidden = !menu.hidden; });
   document.addEventListener('click', () => { menu.hidden = true; }, { once: true });
-  slot.querySelector('[data-logout]').addEventListener('click', async () => {
-    try { await api('/api/auth/logout', { method: 'POST' }); } catch {}
-    user = null;
-    renderChip();
-    emit('logout');
-  });
+  slot.querySelector('[data-logout]').addEventListener('click', signOut);
+}
+
+// phones: the account lives inside the ☰ menu panel instead of a second header button
+function renderNavAccount() {
+  const nav = document.getElementById('topnav');
+  if (!nav) return;
+  let box = nav.querySelector('.nav-account');
+  if (!box) { box = document.createElement('div'); box.className = 'nav-account'; nav.appendChild(box); }
+  if (!user) {
+    box.innerHTML = `<button class="nav-account-btn" data-nav-signin>Sign in</button>`;
+    box.querySelector('[data-nav-signin]').addEventListener('click', () => openAuthModal());
+    return;
+  }
+  const initial = (user.name || user.email)[0].toUpperCase();
+  box.innerHTML = `
+    <div class="nav-account-who"><span class="user-avatar">${initial}</span><span><b>${user.name}</b><small>${user.email}</small></span></div>
+    <button class="nav-account-btn" data-nav-logout>Sign out</button>`;
+  box.querySelector('[data-nav-logout]').addEventListener('click', signOut);
 }
 
 /* ---------------- modal ---------------- */
