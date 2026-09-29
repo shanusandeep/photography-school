@@ -212,3 +212,67 @@ export function suggestedLayouts(s, n) {
   };
   return [...LAYOUTS].sort((a, b) => score(a) - score(b)).slice(0, 6);
 }
+
+/* ---------------- history (multi-level undo / redo) ---------------- */
+// A snapshot is the editable document: everything except transient UI state.
+// Photos are shared by reference (their bitmaps are heavy and never mutated).
+export function snapshot(s) {
+  return {
+    themeId: s.themeId, shapeId: s.shapeId, layoutId: s.layoutId, accent: s.accent,
+    style: { palette: s.style.palette, font: s.style.font }, spacing: s.spacing,
+    photos: [...s.photos],
+    cells: s.cells.map(c => ({ ...c })),
+    texts: { ...s.texts },
+    textOv: JSON.parse(JSON.stringify(s.textOv)),
+    cellOv: JSON.parse(JSON.stringify(s.cellOv)),
+    hideText: s.ui.hideText,
+  };
+}
+export function restore(s, snap) {
+  s.themeId = snap.themeId; s.shapeId = snap.shapeId; s.layoutId = snap.layoutId; s.accent = snap.accent;
+  s.style = { palette: snap.style.palette, font: snap.style.font }; s.spacing = snap.spacing;
+  s.photos = [...snap.photos];
+  s.cells = snap.cells.map(c => ({ ...c }));
+  s.texts = { ...snap.texts };
+  s.textOv = JSON.parse(JSON.stringify(snap.textOv));
+  s.cellOv = JSON.parse(JSON.stringify(snap.cellOv));
+  s.ui.hideText = snap.hideText;
+  s.ui.selected = null; s.ui.selectedText = null; s.ui.swapFrom = null;
+}
+// comparable fingerprint of a snapshot (photos and styles by id)
+export const docKey = (snap) => JSON.stringify({
+  ...snap, photos: snap.photos.map(p => p.id), style: { palette: snap.style.palette?.id || null, font: snap.style.font?.id || null },
+});
+
+export class History {
+  constructor(limit = 60) { this.limit = limit; this.past = []; this.future = []; this.pending = null; }
+  get canUndo() { return this.past.length > 0; }
+  get canRedo() { return this.future.length > 0; }
+  clear() { this.past = []; this.future = []; this.pending = null; }
+  #push(snap) { this.past.push(snap); if (this.past.length > this.limit) this.past.shift(); this.future = []; }
+  // record the state BEFORE a discrete change
+  commit(s) { this.pending = null; this.#push(snapshot(s)); }
+  // continuous changes (drags, sliders, typing): remember where they started…
+  begin(s) { if (!this.pending) this.pending = snapshot(s); }
+  // …and record one step when they end, only if something actually changed
+  end(s) {
+    if (!this.pending) return false;
+    const changed = docKey(this.pending) !== docKey(snapshot(s));
+    if (changed) this.#push(this.pending);
+    this.pending = null;
+    return changed;
+  }
+  undo(s) {
+    if (this.pending) this.end(s);
+    if (!this.past.length) return false;
+    this.future.push(snapshot(s));
+    restore(s, this.past.pop());
+    return true;
+  }
+  redo(s) {
+    if (!this.future.length) return false;
+    this.past.push(snapshot(s));
+    restore(s, this.future.pop());
+    return true;
+  }
+}

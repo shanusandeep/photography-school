@@ -14,7 +14,7 @@ import {
   styledTheme, accentColor, slotText, textOv, setTextOv, slotsFor, isPhotoCell, firstEmptyPhotoCell, photoCellIndices,
   cellDef, setCellOv, hasCellOv, clearCellOv, geometry as geometryOf, fitPhoto, cellQuality as cellQualityOf,
   setLayout as setLayoutOf, setTheme as setThemeOf, setShape as setShapeOf, swapCells as swapCellsOf, assignPhoto as assignPhotoOf,
-  clearCell as clearCellOf, removePhoto as removePhotoOf, placePhotos, resetDocument,
+  clearCell as clearCellOf, removePhoto as removePhotoOf, placePhotos, resetDocument, History,
 } from './collage/core.js';
 import { drawBackground, drawCell, drawForeground, imagePalette as imagePaletteOf, isDark, rotateTo } from './collage/render.js';
 
@@ -107,25 +107,22 @@ async function addPhotos(files, targetCell = null) {
 }
 
 /* ============================================================
-   state operations (single-level undo for photo moves, as before)
+   state operations — every meaningful change goes through history
    ============================================================ */
-function pushUndo() { state.undo = state.cells.map(c => ({ ...c })); }
-function undo() { if (state.undo) { state.cells = state.undo; state.undo = null; } }
-function setLayout(id) { setLayoutOf(state, id); state.undo = null; }
-function setTheme(id) { setThemeOf(state, id); }
-function setShape(id) { setShapeOf(state, id); }
-function swapCells(a, b) { if (a !== b) { pushUndo(); swapCellsOf(state, a, b); } }
-function assignPhoto(i, pid) { pushUndo(); assignPhotoOf(state, i, pid); }
-function clearCell(i) { pushUndo(); clearCellOf(state, i); }
-function removePhoto(pid) {
-  pushUndo();
-  const p = photoById(state, pid);
-  if (p && p.bmp && p.bmp.close) p.bmp.close();
-  removePhotoOf(state, pid);
-}
+const history = new History();
+const commit = () => history.commit(state);
+function setLayout(id) { if (id !== state.layoutId) { commit(); setLayoutOf(state, id); } }
+function setTheme(id) { commit(); setThemeOf(state, id); }
+function setShape(id) { if (id !== state.shapeId) { commit(); setShapeOf(state, id); } }
+function swapCells(a, b) { if (a !== b) { commit(); swapCellsOf(state, a, b); } }
+function assignPhoto(i, pid) { commit(); assignPhotoOf(state, i, pid); }
+function clearCell(i) { commit(); clearCellOf(state, i); }
+function removePhoto(pid) { commit(); removePhotoOf(state, pid); }   // bitmap stays alive for undo
 function resetAll() {
-  state.photos.forEach(p => p.bmp && p.bmp.close && p.bmp.close());
-  resetDocument(state); state.undo = null;
+  const seen = new Set();
+  [...state.photos, ...history.past.flatMap(x => x.photos), ...history.future.flatMap(x => x.photos)]
+    .forEach(p => { if (!seen.has(p.id)) { seen.add(p.id); if (p.bmp && p.bmp.close) p.bmp.close(); } });
+  resetDocument(state); history.clear();
 }
 
 /* ============================================================
@@ -178,7 +175,7 @@ async function exportCollage(preset, format) {
 }
 
 // local-dev inspection handle (never on the live site)
-if (['localhost', '127.0.0.1'].includes(location.hostname)) window.__pt = { state, geometry, exportCollage, addPhotos };
+if (['localhost', '127.0.0.1'].includes(location.hostname)) window.__pt = { state, geometry, exportCollage, addPhotos, history };
 
 /* ============================================================
    view
@@ -224,6 +221,7 @@ export function viewCollage(app) {
         <section class="pt-step">
           <div class="pt-step-title"><span class="mono">04 · Layout</span><button class="chip" data-layout-reset hidden>↔ reset sizes</button></div>
           <p class="pt-note">Click a section to get handles — drag them to resize, drag the grip to move. Photos refit automatically; use zoom to adjust.</p>
+          <label class="pt-range"><span class="mono">Spacing</span><input type="range" data-spacing min="0" max="100" value="${state.spacing}" aria-label="Spacing between sections"><output data-spacing-out>${state.spacing}</output></label>
           <div class="pt-layouts" data-layouts></div>
         </section>
 
@@ -281,7 +279,8 @@ export function viewCollage(app) {
                 <option value="png" ${state.ui.format === 'png' ? 'selected' : ''}>PNG (lossless)</option>
               </select></label>
               <button class="btn btn-primary" data-download>Download</button>
-              <button class="btn btn-ghost btn-small" data-undo disabled>↺ Undo</button>
+              <button class="btn btn-ghost btn-small" data-undo disabled title="Undo (Ctrl/Cmd+Z)">↺ Undo</button>
+              <button class="btn btn-ghost btn-small" data-redo disabled title="Redo (Ctrl/Cmd+Shift+Z)">↻ Redo</button>
               <button class="btn btn-ghost btn-small" data-new>New collage</button>
             </div>
             <p class="pt-export-info" data-export-info></p>
@@ -390,6 +389,7 @@ export function viewCollage(app) {
     const act = e.target.closest('[data-tact]')?.dataset.tact, id = state.ui.selectedText;
     if (!act || !id) return;
     const ov = textOv(state, id);
+    if (act !== 'done') commit();
     if (act === 'bigger') setTextOv(state, id, { scale: Math.min(3, ov.scale * 1.12) });
     else if (act === 'smaller') setTextOv(state, id, { scale: Math.max(0.4, ov.scale / 1.12) });
     else if (act === 'reset') delete state.textOv[id];
@@ -414,6 +414,28 @@ export function viewCollage(app) {
     toolbar.style.left = `${Math.max(120, Math.min(cssW - 120, cell.center.x))}px`;
     toolbar.style.top = `${top}px`;
   }
+
+  // continuous edits (typing, sliders, wheel zoom) coalesce into one history step per burst
+  const coalesceTimers = {};
+  function coalesce(key, ms = 600) {
+    history.begin(state);
+    clearTimeout(coalesceTimers[key]);
+    coalesceTimers[key] = setTimeout(() => { history.end(state); updateExport(); }, ms);
+  }
+  // sync every control from state (after undo/redo or a draft restore)
+  async function refreshAll() {
+    $('[data-themes]').querySelectorAll('[data-theme]').forEach(b => b.classList.toggle('on', b.dataset.theme === state.themeId));
+    $('[data-shapes]').querySelectorAll('[data-shape]').forEach(b => b.classList.toggle('on', b.dataset.shape === state.shapeId));
+    $('[data-accent]').value = accentColor(state);
+    $('[data-spacing]').value = state.spacing; $('[data-spacing-out]').textContent = state.spacing;
+    const hideBtn = $('[data-hide-all]');
+    hideBtn.textContent = state.ui.hideText ? 'show words' : 'photos only'; hideBtn.classList.toggle('on', state.ui.hideText);
+    sizeCanvas();
+    await ensureFonts(styledTheme(state));
+    renderLayouts(); renderSlots(); afterChange();
+  }
+  function doUndo() { if (history.undo(state)) refreshAll(); }
+  function doRedo() { if (history.redo(state)) refreshAll(); }
 
   /* ---------- styles ---------- */
   const bar = (stripes) => `<span class="pt-bar">${stripes.map(c => `<i style="background:${c}"></i>`).join('')}</span>`;
@@ -451,23 +473,24 @@ export function viewCollage(app) {
   $('[data-combos]').addEventListener('click', (e) => {
     const b = e.target.closest('[data-combo]'); if (!b) return;
     const [pid, fid] = b.dataset.combo.split('|');
+    commit();
     state.style = { palette: PALETTES.find(p => p.id === pid), font: FONT_SETS.find(f => f.id === fid) };
     state.accent = null; applyStyleChange();
   });
   $('[data-palettes]').addEventListener('click', (e) => {
     const b = e.target.closest('[data-palette]'); if (!b) return;
-    state.style.palette = PALETTES.find(p => p.id === b.dataset.palette); state.accent = null; applyStyleChange();
+    commit(); state.style.palette = PALETTES.find(p => p.id === b.dataset.palette); state.accent = null; applyStyleChange();
   });
   $('[data-imgpal]').addEventListener('click', (e) => {
     const b = e.target.closest('[data-imgpalette]'); if (!b) return;
     const p = photoById(state, +b.dataset.imgpalette.slice(4)); if (!p) return;
-    state.style.palette = imagePalette(p); state.accent = null; applyStyleChange();
+    commit(); state.style.palette = imagePalette(p); state.accent = null; applyStyleChange();
   });
   $('[data-fonts]').addEventListener('click', (e) => {
     const b = e.target.closest('[data-fontset]'); if (!b) return;
-    state.style.font = FONT_SETS.find(f => f.id === b.dataset.fontset); applyStyleChange();
+    commit(); state.style.font = FONT_SETS.find(f => f.id === b.dataset.fontset); applyStyleChange();
   });
-  $('[data-style-reset]').addEventListener('click', () => { state.style = { palette: null, font: null }; state.accent = null; applyStyleChange(); });
+  $('[data-style-reset]').addEventListener('click', () => { commit(); state.style = { palette: null, font: null }; state.accent = null; applyStyleChange(); });
 
   function renderLayouts() {
     const box = $('[data-layouts]');
@@ -516,19 +539,24 @@ export function viewCollage(app) {
       </div>`;
     }).join('');
     $('[data-slots]').querySelectorAll('[data-slot]').forEach(inp => inp.addEventListener('input', () => {
+      coalesce('text:' + inp.dataset.slot, 800);
       state.texts[inp.dataset.slot] = inp.value;
       redraw();
     }));
   }
   $('[data-slots]').addEventListener('click', (e) => {
     const t = e.target.closest('[data-slot-toggle]'), r = e.target.closest('[data-slot-reset]');
+    if (t || r) commit();
     if (t) { setTextOv(state, t.dataset.slotToggle, { hidden: !textOv(state, t.dataset.slotToggle).hidden }); if (state.ui.selectedText === t.dataset.slotToggle) state.ui.selectedText = null; }
     else if (r) { delete state.textOv[r.dataset.slotReset]; }
     else return;
     renderSlots(); redraw();
   });
-  $('[data-layout-reset]').addEventListener('click', () => { clearCellOv(state, currentLayout(state)); renderLayouts(); afterChange(); });
+  $('[data-layout-reset]').addEventListener('click', () => { commit(); clearCellOv(state, currentLayout(state)); renderLayouts(); afterChange(); });
+  $('[data-spacing]').addEventListener('input', (e) => { coalesce('spacing'); state.spacing = +e.target.value; $('[data-spacing-out]').textContent = state.spacing; redraw(); });
+  $('[data-spacing]').addEventListener('change', () => { history.end(state); renderLayouts(); updateExport(); });
   $('[data-hide-all]').addEventListener('click', (e) => {
+    commit();
     state.ui.hideText = !state.ui.hideText;
     state.ui.selectedText = null;
     e.currentTarget.textContent = state.ui.hideText ? 'show words' : 'photos only';
@@ -579,7 +607,8 @@ export function viewCollage(app) {
     warn.hidden = !soft;
     if (soft) warn.textContent = `⚠ ${soft} photo${soft > 1 ? 's' : ''} fall${soft > 1 ? '' : 's'} below 150 DPI at this size (marked ! on the preview) — zoom out, use a smaller size, or expect softness in print.`;
     $('[data-download]').disabled = !state.photos.length;
-    $('[data-undo]').disabled = !state.undo;
+    $('[data-undo]').disabled = !history.canUndo;
+    $('[data-redo]').disabled = !history.canRedo;
     const done = $('[data-export-done]');
     if (state.ui.lastExport) {
       const r = state.ui.lastExport;
@@ -675,10 +704,11 @@ export function viewCollage(app) {
       return;
     }
     const hk = state.ui.swapFrom === null ? hitHandle(pt.x, pt.y) : null;
-    if (hk) { beginCellDrag(hk, pt); redraw(); return; }
+    if (hk) { history.begin(state); beginCellDrag(hk, pt); redraw(); return; }
     const tid = state.ui.swapFrom === null ? hitText(pt.x, pt.y) : null;
     if (tid) {
       state.ui.selectedText = tid; state.ui.selected = null;
+      history.begin(state);
       textDrag = { id: tid, startX: pt.x, startY: pt.y, dx0: textOv(state, tid).dx, dy0: textOv(state, tid).dy };
       redraw(); return;
     }
@@ -698,6 +728,7 @@ export function viewCollage(app) {
     const g = geometry(cssW, cssH);
     const p = photoById(state, c.photoId);
     const f = fitPhoto(g.cells[i].photo, p.bmp.width, p.bmp.height, c);
+    history.begin(state);
     drag = { i, startX: pt.x, startY: pt.y, panX: c.panX, panY: c.panY, moved: false,
              overX: f.dw - g.cells[i].photo.w, overY: f.dh - g.cells[i].photo.h, rot: g.cells[i].rot };
     state.ui.selected = i;
@@ -732,6 +763,7 @@ export function viewCollage(app) {
 
   const endPointer = (e) => {
     pointers.delete(e.pointerId);
+    if ((cellDrag || textDrag || drag || pinch) && pointers.size === 0) history.end(state);
     if (cellDrag) { cellDrag = null; renderLayouts(); updateExport(); redraw(); }
     if (textDrag) { textDrag = null; renderSlots(); redraw(); }
     if (pinch && pointers.size < 2) { pinch = null; updateExport(); }
@@ -745,6 +777,7 @@ export function viewCollage(app) {
     const i = hitTest(pt.x, pt.y);
     if (i < 0 || !state.cells[i].photoId) return;
     e.preventDefault();
+    coalesce('wheel:' + i, 500);
     const c = state.cells[i];
     c.zoom = Math.min(4, Math.max(1, c.zoom * (e.deltaY < 0 ? 1.06 : 0.94)));
     state.ui.selected = i;
@@ -757,6 +790,7 @@ export function viewCollage(app) {
     const i = state.ui.selected;
     if (!act || i === null) return;
     const c = state.cells[i] || {};
+    if (['zoom-in', 'zoom-out', 'reset-cell'].includes(act)) commit();
     switch (act) {
       case 'zoom-in': c.zoom = Math.min(4, c.zoom * 1.15); break;
       case 'zoom-out': c.zoom = Math.max(1, c.zoom / 1.15); break;
@@ -774,7 +808,15 @@ export function viewCollage(app) {
   // tapping anywhere outside the collage, or pressing Escape, puts the controls away
   function deselect() { state.ui.selected = null; state.ui.selectedText = null; state.ui.swapFrom = null; }
   stage.addEventListener('pointerdown', (e) => { if (!wrap.contains(e.target)) { deselect(); redraw(); } });
-  const onKey = (e) => { if (e.key === 'Escape' && (state.ui.selected !== null || state.ui.selectedText)) { deselect(); redraw(); } };
+  const onKey = (e) => {
+    if (!document.body.contains(canvas)) { document.removeEventListener('keydown', onKey); return; }   // view was replaced
+    const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName);
+    if (e.key === 'Escape' && (state.ui.selected !== null || state.ui.selectedText)) { deselect(); redraw(); return; }
+    if (typing) return;
+    const mod = e.metaKey || e.ctrlKey;
+    if (mod && !e.shiftKey && e.key.toLowerCase() === 'z') { e.preventDefault(); doUndo(); }
+    else if (mod && ((e.shiftKey && e.key.toLowerCase() === 'z') || e.key.toLowerCase() === 'y')) { e.preventDefault(); doRedo(); }
+  };
   document.addEventListener('keydown', onKey);
 
   /* ---------- file input / tray ---------- */
@@ -783,7 +825,7 @@ export function viewCollage(app) {
     fileInput.value = '';
     if (!files.length) return;
     $('[data-hint]').textContent = 'Loading photos…';
-    pushUndo();
+    commit();
     await addPhotos(files, fileTarget);
     fileTarget = null;
     $('[data-hint]').textContent = 'Drag a photo to reposition · scroll or pinch to zoom · click a photo for more controls';
@@ -797,7 +839,7 @@ export function viewCollage(app) {
     e.preventDefault(); wrap.classList.remove('drop');
     const r = canvas.getBoundingClientRect();
     const i = hitTest(e.clientX - r.left, e.clientY - r.top);
-    pushUndo();
+    commit();
     await addPhotos([...e.dataTransfer.files], i >= 0 ? i : null);
     afterChange();
   });
@@ -817,13 +859,14 @@ export function viewCollage(app) {
     $('[data-shapes]').querySelectorAll('.pt-chip').forEach(b => b.classList.toggle('on', b === btn));
     sizeCanvas(); renderLayouts(); afterChange();
   });
-  $('[data-accent]').addEventListener('input', (e) => { state.accent = e.target.value; renderLayouts(); redraw(); });
-  $('[data-accent-reset]').addEventListener('click', () => { state.accent = null; $('[data-accent]').value = accentColor(state); renderLayouts(); redraw(); });
+  $('[data-accent]').addEventListener('input', (e) => { coalesce('accent'); state.accent = e.target.value; renderLayouts(); redraw(); });
+  $('[data-accent-reset]').addEventListener('click', () => { commit(); state.accent = null; $('[data-accent]').value = accentColor(state); renderLayouts(); redraw(); });
 
   /* ---------- export ---------- */
   $('[data-preset]').addEventListener('change', (e) => { state.ui.preset = e.target.value; updateExport(); redraw(); });
   $('[data-format]').addEventListener('change', (e) => { state.ui.format = e.target.value; });
-  $('[data-undo]').addEventListener('click', () => { undo(); afterChange(); });
+  $('[data-undo]').addEventListener('click', doUndo);
+  $('[data-redo]').addEventListener('click', doRedo);
   $('[data-new]').addEventListener('click', () => {
     if (hasContent(state) && !confirm('Discard this collage and start a new one?')) return;
     resetAll(); renderSlots(); afterChange();

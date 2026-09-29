@@ -724,3 +724,8 @@ main.pt-full .view { animation: none; }
 /* toolbar: destructive actions stand apart from routine ones */
 .pt-toolbar .pt-danger { color: var(--red); }
 .pt-toolbar .pt-danger:hover { background: var(--red); color: var(--paper); }
+
+/* inline range control (spacing) */
+.pt-range { display: grid; grid-template-columns: 70px 1fr 34px; align-items: center; gap: .6rem; margin: .2rem 0 .8rem; }
+.pt-range .mono { color: var(--paper-faint); }
+.pt-range output { font-family: var(--font-mono); font-size: .7rem; color: var(--amber); text-align: right; }
