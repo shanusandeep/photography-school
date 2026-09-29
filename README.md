@@ -36,13 +36,25 @@ in guest mode (localStorage only).
 | `js/data/curriculum-b.js` | Modules 06–10 (Lenses & Gear, Genres, Editing, Advanced, Craft) |
 | `js/data/index.js` | Data index + Field Notes cards |
 | `js/auth.js` | Sign-in modal, session state, Google SSO button |
-| `js/collage.js` | Collage Maker (free members' tool) — themed collage studio: shared canvas renderer (preview = export), pointer editing, high-res export with memory fallback |
+| `js/collage.js` | Collage Maker UI — open to guests: tool tabs (Photos → Layout → Style → Text), contextual card, pointer editing, undo/redo, drafts, export with progress |
+| `js/collage/core.js` | Collage core (pure, DOM-free): state, geometry, text-slot resolution, section overrides, editing ops, History, draft serialization |
+| `js/collage/render.js` | Collage canvas renderer — one code path for preview, thumbnails and export |
+| `js/collage/draft.js` | Local draft persistence in IndexedDB (document + original photo files); this browser only, no sync |
 | `js/data/collage.js` | Collage data: canvas shapes + export presets, 37 layouts (17 moodboard, 10 photos-only, 10 classic), 6 theme packs, 12 palettes, 9 font sets, 8 combinations |
+| `test/*.test.mjs` | node:test coverage for the collage core, history and draft serialization — `npm test` (no dependencies) |
 | `server/server.mjs` | Accounts & progress API — zero-dep Node, SQLite, scrypt passwords, HMAC session cookies, Google ID-token verification |
+
+## Collage Maker notes
+
+- No account needed. Photos never leave the browser: editing uses a ≤1600px working copy, the export re-decodes the originals. There is no upload code path.
+- Drafts autosave to IndexedDB in the current browser only (document + photo files). They do not sync between devices or accounts. Empty boards are not kept.
+- Export presets derive from the canvas shape; the largest is 4096px on the long edge, with an automatic 75%/50% retry if the device cannot allocate the canvas (the result line reports the actual size).
+- Formats: JPEG, PNG, WebP and GIF are supported by every current browser. HEIC (iPhone) decodes only where the browser itself supports it (Safari); this has not been verified on a device in this repo.
+- Keyboard: every panel control, the Photos grid and the word “adjust” buttons work with Tab/Enter; resizing sections and free dragging on the canvas are pointer-only.
 
 ## Notes
 
-- Progress lives in `localStorage` under `darkroom-progress-v1` — clear it to reset the course.
+- Course progress is saved to the signed-in account (the API); the Collage Maker needs no account.
 - No build step, no dependencies; plain ES modules.
 - Content is fully editable: each lesson is a list of typed blocks (`p`, `tip`,
   `table`, `assignment`, `widget`, …) in the curriculum files.

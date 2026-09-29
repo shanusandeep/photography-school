@@ -873,3 +873,8 @@ main.pt-full .view { animation: none; }
     position: absolute; left: .5rem; right: .5rem; bottom: calc(100% + 4px); background: rgba(18,16,13,.95); border: 1px solid var(--line); border-radius: 3px; padding: .3rem .5rem; white-space: normal; z-index: 3; }
   .pt-side { max-height: 40vh; }
 }
+
+.pt-side-head { flex-wrap: wrap; }
+.pt-course-link { flex-basis: 100%; font-size: .74rem; color: var(--paper-dim); text-decoration: none; margin-top: .35rem; }
+.pt-course-link:hover { color: var(--amber); text-decoration: underline; }
+@media (max-width: 900px) { .pt-course-link { display: none; } }

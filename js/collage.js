@@ -232,6 +232,7 @@ export function viewCollage(app) {
         <div class="pt-side-head">
           <span class="mono" style="color:var(--amber)">Collage Maker · free</span>
           <span class="mono" style="color:var(--paper-faint)" data-save-status>photos stay on this device</span>
+          <a class="pt-course-link" href="#/">Explore the free photography course →</a>
         </div>
         <div class="pt-tabs" role="tablist" aria-label="Tool groups">
           ${TABS.map(([id, label]) => `<button role="tab" id="pt-tab-${id}" aria-controls="pt-panel-${id}" aria-selected="${state.ui.tab === id}" tabindex="${state.ui.tab === id ? 0 : -1}" data-tab="${id}">${label}</button>`).join('')}

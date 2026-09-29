@@ -198,9 +198,9 @@ function viewHome() {
 
     <section class="pt-promo">
       <div>
-        <span class="mono" style="color:var(--amber)">FREE MEMBERS' TOOL</span>
+        <span class="mono" style="color:var(--amber)">FREE · NO ACCOUNT NEEDED</span>
         <h3>Collage Maker — themed collages, print-ready</h3>
-        <p>Newborn, birthday, graduation, wedding, maternity or classic darkroom: pick a theme and a layout, drop in your photos, add the words, and download a 300-DPI file. 37 layouts, palettes and font sets — everything stays on your device.</p>
+        <p>Newborn, birthday, graduation, wedding, maternity or classic darkroom: pick a theme and a layout, drop in your photos, add the words, and download a 300-DPI file. 37 layouts, palettes and font sets — everything stays on your device, no sign-in required.</p>
       </div>
       <a class="btn btn-primary" href="#/collage">Open Collage Maker</a>
     </section>
@@ -444,7 +444,7 @@ function viewGate() {
 }
 
 /* ---------------- router ---------------- */
-const GATED = new Set(['module', 'lesson', 'quiz', 'collage']);
+const GATED = new Set(['module', 'lesson', 'quiz']);   // the Collage Maker is open to guests; course routes need an account
 
 function route() {
   const hash = location.hash.slice(2) || '';
@@ -452,12 +452,13 @@ function route() {
   window.scrollTo({ top: 0 });
   updateTopbar();
 
-  // the Print Table is a full-page workspace (no content column, no footer)
-  const workspace = parts[0] === 'collage' && !!getUser();
+  // the Collage Maker is a full-page workspace (no content column, no footer)
+  const workspace = parts[0] === 'collage';
   app.classList.toggle('pt-full', workspace);
   document.body.classList.toggle('pt-mode', workspace);
 
   if (GATED.has(parts[0]) && !getUser()) return viewGate();
+  pendingHash = null;                        // moved on from a gated page: a later sign-in stays where the user is
 
   if (parts[0] === 'module' && parts[1]) return viewModule(parts[1]);
   if (parts[0] === 'lesson' && parts[1] && parts[2]) return viewLesson(parts[1], parts[2]);
