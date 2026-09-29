@@ -28,6 +28,7 @@ const state = {
   cells: [],                  // one per layout cell
   texts: {},                  // slotId -> user text (absent = theme default)
   textOv: {},                 // slotId -> { dx, dy, scale, hidden } — moved / resized / removed words
+  cellOv: {},                 // layoutId -> { cellIndex: { x, y, w, h } } — user-resized / moved sections
   undo: null,                 // single-level snapshot of cells
   ui: { selected: null, selectedText: null, swapFrom: null, hideText: true, preset: 'web', format: 'jpeg', lastExport: null },   // photos only by default; words are opt-in
 };
@@ -128,7 +129,8 @@ function geometry(W, H, opts = {}) {
   const band = { x: m, y: top ? 0 : H - bandH, w: W - 2 * m, h: bandH };
   const insetB = u * 0.012;
 
-  const cells = layout.cells.map((c) => {
+  const cells = layout.cells.map((c0, ci) => {
+    const c = cellDef(layout, ci);
     const type = c.type || 'photo';
     if (layout.polaroid) {
       const frameW = c.w * Math.min(content.w, content.h * 1.02);
@@ -172,6 +174,17 @@ function drawLine(ctx, g, id, text, x, y, size, kind, o = {}) {
 }
 
 const isPhotoCell = (i, layout = currentLayout()) => (layout.cells[i].type || 'photo') === 'photo';
+// a layout cell with the user's size/position override applied (normalized content units)
+function cellDef(layout, i) {
+  const ov = state.cellOv[layout.id] && state.cellOv[layout.id][i];
+  return ov ? { ...layout.cells[i], ...ov } : layout.cells[i];
+}
+function setCellOv(layout, i, patch) {
+  const all = state.cellOv[layout.id] || (state.cellOv[layout.id] = {});
+  const c = layout.cells[i];
+  all[i] = { x: c.x, y: c.y, w: c.w, h: c.h, ...(all[i] || {}), ...patch };
+}
+const hasCellOv = (layout, i) => !!(state.cellOv[layout.id] && state.cellOv[layout.id][i]);
 
 function pathRoundRect(ctx, r, radius) {
   ctx.beginPath();
@@ -730,7 +743,7 @@ function removePhoto(photoId) {
 }
 function resetAll() {
   state.photos.forEach(p => p.bmp && p.bmp.close && p.bmp.close());
-  state.photos = []; state.texts = {}; state.accent = null; state.undo = null;
+  state.photos = []; state.texts = {}; state.textOv = {}; state.cellOv = {}; state.accent = null; state.undo = null;
   state.cells = currentLayout().cells.map(emptyCell);
   state.ui.selected = null; state.ui.swapFrom = null; state.ui.lastExport = null;
 }
@@ -841,7 +854,8 @@ export function viewCollage(app) {
         </section>
 
         <section class="pt-step">
-          <div class="pt-step-title"><span class="mono">04 · Layout</span><span class="mono pt-suggest">★ suits this theme</span></div>
+          <div class="pt-step-title"><span class="mono">04 · Layout</span><button class="chip" data-layout-reset hidden>↔ reset sizes</button></div>
+          <p class="pt-note">Click a section to get handles — drag them to resize, drag the grip to move. Photos refit automatically; use zoom to adjust.</p>
           <div class="pt-layouts" data-layouts></div>
         </section>
 
@@ -857,15 +871,17 @@ export function viewCollage(app) {
           <div class="pt-canvas-wrap" data-wrap>
             <canvas data-preview aria-label="Collage preview"></canvas>
             <div class="pt-toolbar" data-toolbar hidden>
-              <button data-act="zoom-out" title="Zoom out">−</button>
-              <button data-act="zoom-in" title="Zoom in">+</button>
-              <span class="pt-sep"></span>
-              <button data-act="up" title="Move to previous cell">↑</button>
-              <button data-act="down" title="Move to next cell">↓</button>
-              <button data-act="swap" title="Swap with another cell">⇄ Swap</button>
-              <span class="pt-sep"></span>
-              <button data-act="replace" title="Replace photo">Replace</button>
-              <button data-act="clear" title="Clear cell">✕</button>
+              <button data-act="zoom-out" title="Zoom out" data-photo-only>−</button>
+              <button data-act="zoom-in" title="Zoom in" data-photo-only>+</button>
+              <span class="pt-sep" data-photo-only></span>
+              <button data-act="up" title="Move to previous cell" data-photo-only>↑</button>
+              <button data-act="down" title="Move to next cell" data-photo-only>↓</button>
+              <button data-act="swap" title="Swap with another cell" data-photo-only>⇄ Swap</button>
+              <span class="pt-sep" data-photo-only></span>
+              <button data-act="replace" title="Replace photo" data-photo-only>Replace</button>
+              <button data-act="clear" title="Clear cell" data-photo-only>✕</button>
+              <button data-act="add" title="Add a photo here" data-empty-only>+ Add photo</button>
+              <button data-act="reset-cell" title="Reset this section's size & position" data-ov-only>↔ Reset size</button>
             </div>
             <div class="pt-toolbar" data-text-toolbar hidden>
               <button data-tact="smaller" title="Smaller text">A−</button>
@@ -975,10 +991,13 @@ export function viewCollage(app) {
       ctx.strokeStyle = state.ui.swapFrom !== null ? '#7fa650' : '#e8a33d'; ctx.lineWidth = 2.5; ctx.setLineDash([7, 5]);
       ctx.strokeRect(cell.rect.x - 2, cell.rect.y - 2, cell.rect.w + 4, cell.rect.h + 4);
       ctx.restore();
+      if (state.ui.swapFrom === null && !drag) drawHandles(ctx, cell);
     }
     positionToolbar(g);
+    $('[data-layout-reset]').hidden = !state.cellOv[g.layout.id] || !Object.keys(state.cellOv[g.layout.id]).length;
   }
-  const redraw = () => { if (!raf) raf = requestAnimationFrame(draw); };
+  // rAF is paused in hidden tabs; fall back to a timer so state never gets ahead of the canvas
+  const redraw = () => { if (!raf) raf = document.hidden ? setTimeout(draw, 16) : requestAnimationFrame(draw); };
 
   let lastG = null;
   const textToolbar = $('[data-text-toolbar]');
@@ -1012,11 +1031,17 @@ export function viewCollage(app) {
 
   function positionToolbar(g) {
     const i = state.ui.selected;
-    if (i === null || !state.cells[i]?.photoId || state.ui.swapFrom !== null || drag) { toolbar.hidden = true; return; }
+    if (i === null || state.ui.swapFrom !== null || drag || cellDrag) { toolbar.hidden = true; return; }
     const cell = g.cells[i];
+    const hasPhoto = cell.type === 'photo' && !!state.cells[i].photoId;
+    const ov = hasCellOv(g.layout, i);
+    toolbar.querySelectorAll('[data-photo-only]').forEach(b => { b.hidden = !hasPhoto; });
+    toolbar.querySelectorAll('[data-empty-only]').forEach(b => { b.hidden = !(cell.type === 'photo' && !hasPhoto); });
+    toolbar.querySelectorAll('[data-ov-only]').forEach(b => { b.hidden = !ov; });
+    if (!hasPhoto && cell.type !== 'photo' && !ov) { toolbar.hidden = true; return; }
     toolbar.hidden = false;
     const half = Math.hypot(cell.rect.w, cell.rect.h) / 2;
-    const top = Math.min(cssH - 44, cell.center.y + (cell.rot ? half * 0.9 : cell.rect.h / 2) + 8);
+    const top = Math.min(cssH - 44, cell.center.y + (cell.rot ? half * 0.9 : cell.rect.h / 2) + 22);   // clear of the bottom handles
     toolbar.style.left = `${Math.max(120, Math.min(cssW - 120, cell.center.x))}px`;
     toolbar.style.top = `${top}px`;
   }
@@ -1137,6 +1162,7 @@ export function viewCollage(app) {
     else return;
     renderSlots(); redraw();
   });
+  $('[data-layout-reset]').addEventListener('click', () => { delete state.cellOv[currentLayout().id]; renderLayouts(); afterChange(); });
   $('[data-hide-all]').addEventListener('click', (e) => {
     state.ui.hideText = !state.ui.hideText;
     state.ui.selectedText = null;
@@ -1201,12 +1227,72 @@ export function viewCollage(app) {
 
   function afterChange() { renderThumbs(); updateExport(); redraw(); }
 
+  /* ---------- section handles (resize / move) ---------- */
+  const HANDLE_R = 7;
+  // handle positions in canvas coords for a cell; tilted frames get corners only (uniform scale)
+  function cellHandles(cell) {
+    const r = cell.rect, cx = cell.center.x, cy = cell.center.y;
+    const local = cell.rot
+      ? [['nw', r.x, r.y], ['ne', r.x + r.w, r.y], ['se', r.x + r.w, r.y + r.h], ['sw', r.x, r.y + r.h]]
+      : [['nw', r.x, r.y], ['n', cx, r.y], ['ne', r.x + r.w, r.y], ['e', r.x + r.w, cy], ['se', r.x + r.w, r.y + r.h], ['s', cx, r.y + r.h], ['sw', r.x, r.y + r.h], ['w', r.x, cy]];
+    local.push(['move', cx, r.y - 22]);
+    const cs = Math.cos(cell.rot), sn = Math.sin(cell.rot);
+    return local.map(([id, x, y]) => { const dx = x - cx, dy = y - cy; return { id, x: cx + dx * cs - dy * sn, y: cy + dx * sn + dy * cs }; });
+  }
+  function drawHandles(ctx, cell) {
+    for (const h of cellHandles(cell)) {
+      ctx.save();
+      ctx.beginPath();
+      if (h.id === 'move') { ctx.arc(h.x, h.y, HANDLE_R + 3, 0, Math.PI * 2); ctx.fillStyle = '#e8a33d'; ctx.fill(); ctx.fillStyle = '#12100d'; ctx.font = '700 11px "Hanken Grotesk"'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('✥', h.x, h.y + 0.5); }
+      else { ctx.rect(h.x - HANDLE_R + 1, h.y - HANDLE_R + 1, HANDLE_R * 2 - 2, HANDLE_R * 2 - 2); ctx.fillStyle = '#e8a33d'; ctx.strokeStyle = '#12100d'; ctx.lineWidth = 1.5; ctx.fill(); ctx.stroke(); }
+      ctx.restore();
+    }
+  }
+  function hitHandle(x, y) {
+    const i = state.ui.selected;
+    if (i === null || !lastG || !lastG.cells[i]) return null;
+    for (const h of cellHandles(lastG.cells[i])) if (Math.hypot(x - h.x, y - h.y) <= HANDLE_R + 5) return h.id;
+    return null;
+  }
+  let cellDrag = null;  // { i, kind, startX, startY, def0, center, rot, content, r0 }
+  function beginCellDrag(kind, pt) {
+    const i = state.ui.selected, g = lastG, cell = g.cells[i];
+    const d = cellDef(g.layout, i);
+    cellDrag = { i, kind, startX: pt.x, startY: pt.y, def0: { x: d.x, y: d.y, w: d.w, h: d.h }, center: cell.center, rot: cell.rot, content: g.content,
+                 r0: Math.hypot(pt.x - cell.center.x, pt.y - cell.center.y), polaroid: !!cell.polaroid };
+  }
+  function applyCellDrag(pt) {
+    const { i, kind, def0, content, rot, polaroid } = cellDrag;
+    const layout = currentLayout();
+    const dxn = (pt.x - cellDrag.startX) / content.w, dyn = (pt.y - cellDrag.startY) / content.h;
+    const MIN = 0.06;
+    let { x, y, w, h } = def0;
+    if (kind === 'move') {
+      x = def0.x + dxn; y = def0.y + dyn;
+      if (!polaroid) { x = Math.max(0, Math.min(1 - w, x)); y = Math.max(0, Math.min(1 - h, y)); }
+      else { x = Math.max(0.05, Math.min(0.95, x)); y = Math.max(0.05, Math.min(0.95, y)); }
+      setCellOv(layout, i, { x, y }); return;
+    }
+    if (rot || polaroid) {
+      // tilted frames scale uniformly about their centre
+      const f = Math.max(0.3, Math.min(3, Math.hypot(pt.x - cellDrag.center.x, pt.y - cellDrag.center.y) / Math.max(1, cellDrag.r0)));
+      const nw = Math.max(MIN, def0.w * f);
+      if (polaroid) setCellOv(layout, i, { w: nw });
+      else { const nh = Math.max(MIN, def0.h * f); setCellOv(layout, i, { w: nw, h: nh, x: def0.x + (def0.w - nw) / 2, y: def0.y + (def0.h - nh) / 2 }); }
+      return;
+    }
+    if (kind.includes('e')) w = Math.max(MIN, Math.min(1 - x, def0.w + dxn));
+    if (kind.includes('s')) h = Math.max(MIN, Math.min(1 - y, def0.h + dyn));
+    if (kind.includes('w')) { const nx = Math.max(0, Math.min(def0.x + def0.w - MIN, def0.x + dxn)); w = def0.x + def0.w - nx; x = nx; }
+    if (kind.includes('n')) { const ny = Math.max(0, Math.min(def0.y + def0.h - MIN, def0.y + dyn)); h = def0.y + def0.h - ny; y = ny; }
+    setCellOv(layout, i, { x, y, w, h });
+  }
+
   /* ---------- pointer interaction on the preview ---------- */
   function hitTest(x, y) {
     const g = geometry(cssW, cssH);
     for (let i = g.cells.length - 1; i >= 0; i--) {
       const cell = g.cells[i];
-      if (cell.type !== 'photo') continue;
       const dx = x - cell.center.x, dy = y - cell.center.y;
       const cos = Math.cos(-cell.rot), sin = Math.sin(-cell.rot);
       const lx = dx * cos - dy * sin, ly = dx * sin + dy * cos;
@@ -1232,7 +1318,10 @@ export function viewCollage(app) {
       drag = null;
       return;
     }
-    // words sit on top of everything, so test them first
+    // resize / move handles of the selected section come first
+    const hk = state.ui.swapFrom === null ? hitHandle(pt.x, pt.y) : null;
+    if (hk) { beginCellDrag(hk, pt); redraw(); return; }
+    // then words, which sit on top of everything
     const tid = state.ui.swapFrom === null ? hitText(pt.x, pt.y) : null;
     if (tid) {
       state.ui.selectedText = tid; state.ui.selected = null;
@@ -1250,6 +1339,7 @@ export function viewCollage(app) {
       return;
     }
     const c = state.cells[i];
+    if (!isPhotoCell(i)) { state.ui.selected = i; redraw(); return; }           // text / swatch section: select for resizing only
     if (!c.photoId) { fileTarget = i; state.ui.selected = i; fileInput.click(); redraw(); return; }
     const g = geometry(cssW, cssH);
     const p = photoById(c.photoId);
@@ -1270,6 +1360,7 @@ export function viewCollage(app) {
       state.cells[pinch.i].zoom = Math.min(4, Math.max(1, pinch.zoom * d / pinch.dist));
       redraw(); return;
     }
+    if (cellDrag) { applyCellDrag(pt); redraw(); return; }
     if (textDrag) {
       setTextOv(textDrag.id, { dx: textDrag.dx0 + (pt.x - textDrag.startX) / cssW, dy: textDrag.dy0 + (pt.y - textDrag.startY) / cssH });
       redraw(); return;
@@ -1287,6 +1378,7 @@ export function viewCollage(app) {
 
   const endPointer = (e) => {
     pointers.delete(e.pointerId);
+    if (cellDrag) { cellDrag = null; renderLayouts(); updateExport(); redraw(); }
     if (textDrag) { textDrag = null; renderSlots(); redraw(); }
     if (pinch && pointers.size < 2) { pinch = null; updateExport(); }
     if (drag) { drag = null; updateExport(); redraw(); }
@@ -1310,15 +1402,16 @@ export function viewCollage(app) {
     const act = e.target.closest('[data-act]')?.dataset.act;
     const i = state.ui.selected;
     if (!act || i === null) return;
-    const c = state.cells[i];
+    const c = state.cells[i] || {};
     switch (act) {
       case 'zoom-in': c.zoom = Math.min(4, c.zoom * 1.15); break;
       case 'zoom-out': c.zoom = Math.max(1, c.zoom / 1.15); break;
       case 'up': { const ps = photoCellIndices(), k = ps.indexOf(i); if (k > 0) { swapCells(i, ps[k - 1]); state.ui.selected = ps[k - 1]; } break; }
       case 'down': { const ps = photoCellIndices(), k = ps.indexOf(i); if (k < ps.length - 1) { swapCells(i, ps[k + 1]); state.ui.selected = ps[k + 1]; } break; }
       case 'swap': state.ui.swapFrom = i; $('[data-hint]').textContent = 'Swap mode — click the cell to swap with (click the same cell to cancel).'; break;
-      case 'replace': fileTarget = i; fileInput.click(); break;
+      case 'replace': case 'add': fileTarget = i; fileInput.click(); break;
       case 'clear': clearCell(i); break;
+      case 'reset-cell': { const l = currentLayout(); if (state.cellOv[l.id]) delete state.cellOv[l.id][i]; renderLayouts(); break; }
     }
     afterChange();
   });
