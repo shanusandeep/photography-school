@@ -739,3 +739,20 @@ main.pt-full .view { animation: none; }
 .pt-draft small { display: block; font-size: .72rem; color: var(--paper-faint); margin-top: .15rem; }
 .pt-draft-actions { display: flex; gap: .5rem; }
 .pt-draft[hidden] { display: none; }
+
+/* empty state over the canvas */
+.pt-empty { position: absolute; inset: 0; z-index: 4; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 2rem; gap: .6rem;
+  background: rgba(18,16,13,.72); backdrop-filter: blur(2px); }
+.pt-empty[hidden] { display: none; }
+.pt-empty h2 { font-family: var(--font-display); font-weight: 400; font-size: clamp(1.6rem, 3vw, 2.2rem); }
+.pt-empty p { max-width: 46ch; color: var(--paper-dim); font-weight: 300; }
+.pt-empty-actions { display: flex; gap: .8rem; flex-wrap: wrap; justify-content: center; margin: .6rem 0; }
+.pt-empty small { max-width: 60ch; color: var(--paper-faint); font-size: .74rem; line-height: 1.5; }
+.pt-export-status { margin-top: .3rem; font-size: .76rem; color: var(--paper-dim); }
+.pt-export-error { margin-top: .3rem; font-size: .76rem; color: var(--red); }
+.pt-empty { overflow: hidden; container-type: inline-size; }
+.pt-empty p, .pt-empty small { max-width: 100%; }
+.pt-empty p { font-size: clamp(.8rem, 3.2cqw, 1rem); }
+.pt-empty small { font-size: clamp(.62rem, 2.4cqw, .74rem); }
+.pt-empty h2 { font-size: clamp(1.2rem, 6cqw, 2.2rem); }
+@container (max-width: 420px) { .pt-empty { padding: 1rem; gap: .35rem; } .pt-empty small { display: none; } .pt-empty .btn { padding: .6rem .9rem; font-size: .62rem; } }

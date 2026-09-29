@@ -107,6 +107,16 @@ async function addPhotos(files, targetCell = null) {
   return added;
 }
 
+const SAMPLE_PHOTOS = ['hero', 'craft', 'genres', 'advanced', 'focus', 'light'];   // CC-licensed images already on the site (credits on Field Notes)
+async function loadSamplePhotos() {
+  const files = [];
+  for (const n of SAMPLE_PHOTOS) {
+    try { const b = await fetch(`img/${n}.jpg`).then(r => r.ok ? r.blob() : null); if (b) files.push(new File([b], `sample-${n}.jpg`, { type: 'image/jpeg' })); }
+    catch { /* offline: skip */ }
+  }
+  return files;
+}
+
 /* ============================================================
    state operations — every meaningful change goes through history
    ============================================================ */
@@ -129,7 +139,8 @@ function resetAll() {
 /* ============================================================
    export
    ============================================================ */
-async function exportCollage(preset, format) {
+async function exportCollage(preset, format, onProgress = () => {}) {
+  onProgress({ phase: 'fonts' });
   await ensureFonts(styledTheme(state));
   const type = format === 'png' ? 'image/png' : 'image/jpeg';
   let result = null;
@@ -142,9 +153,12 @@ async function exportCollage(preset, format) {
       const g = geometry(W, H);
       drawBackground(state, ctx, g);
       // decode originals one at a time, sized exactly to what the cell draws, then release
+      const total = state.cells.filter((c, i) => isPhotoCell(state, i) && c.photoId).length;
+      let n = 0;
       for (let i = 0; i < g.cells.length; i++) {
         const c = state.cells[i], p = isPhotoCell(state, i) ? photoById(state, c.photoId) : null;
         if (!p) { drawCell(state, ctx, g, i, null, { makeCanvas }); continue; }
+        onProgress({ phase: 'photo', i: ++n, n: total, W, H, reduced: k < 1 });
         const f = fitPhoto(g.cells[i].photo, p.iw, p.ih, c);
         const url = URL.createObjectURL(p.file);
         let bmp;
@@ -158,6 +172,7 @@ async function exportCollage(preset, format) {
         }
       }
       drawForeground(state, ctx, g, makeCanvas);
+      onProgress({ phase: 'encode', W, H });
       const blob = await new Promise(res => canvas.toBlob(res, type, 0.92));
       if (!blob || blob.size < 2000) throw new Error('blob failed');
       canvas.width = canvas.height = 1;      // release the big buffer promptly
@@ -285,6 +300,16 @@ export function viewCollage(app) {
             </div>
           </div>
           <p class="pt-hint" data-hint>Click an empty cell to add photos · drag a photo to reposition · scroll or pinch to zoom · click a photo for more controls</p>
+          <div class="pt-empty" data-empty hidden>
+            <span class="mono" style="color:var(--amber)">Collage Maker</span>
+            <h2>Create a photo collage</h2>
+            <p>Add a few photos and they drop straight into the layout. Then pick a theme, resize sections, add words if you like, and download a print-ready file.</p>
+            <div class="pt-empty-actions">
+              <button class="btn btn-primary" data-empty-add>+ Add photos</button>
+              <button class="btn btn-ghost" data-empty-samples>Try sample photos</button>
+            </div>
+            <small>JPEG, PNG, WebP or GIF. Large photos are fine — you edit a lighter copy and the original is used for the download. iPhone HEIC files open only in browsers that support them (Safari does; Chrome does not) — convert those to JPEG first. Photos stay on this device.</small>
+          </div>
           <div class="pt-draft" data-draft hidden role="region" aria-label="Unfinished collage">
             <div><b>Unfinished collage found</b><span data-draft-meta></span><small>Saved in this browser only — it does not sync to other devices.</small></div>
             <div class="pt-draft-actions">
@@ -314,7 +339,9 @@ export function viewCollage(app) {
             </div>
             <p class="pt-export-info" data-export-info></p>
             <p class="pt-export-warn" data-export-warn hidden></p>
+            <p class="pt-export-status" data-export-status role="status" aria-live="polite" hidden></p>
             <p class="pt-export-done" data-export-done hidden></p>
+            <p class="pt-export-error" data-export-error role="alert" hidden></p>
             <p class="pt-export-warn" data-save-note hidden></p>
           </div>
         </div>
@@ -606,7 +633,11 @@ export function viewCollage(app) {
     renderStyles();                       // image palettes follow the photo tray
     const box = $('[data-thumbs]');
     box.innerHTML = '';
-    if (!state.photos.length) { box.innerHTML = '<span class="pt-tray-empty">No photos yet — add some, or click any empty cell.</span>'; return; }
+    if (!state.photos.length) {
+      box.innerHTML = '<span class="pt-tray-empty">No photos yet — add some, click any empty cell, or </span><button class="chip" data-tray-samples>try sample photos</button>';
+      box.querySelector('[data-tray-samples]').addEventListener('click', useSamples);
+      return;
+    }
     state.photos.forEach(p => {
       const inCell = state.cells.findIndex(c => c.photoId === p.id);
       const el = document.createElement('div');
@@ -656,7 +687,19 @@ export function viewCollage(app) {
     } else done.hidden = true;
   }
 
-  function afterChange() { renderThumbs(); updateExport(); redraw(); }
+  function renderEmpty() {
+    $('[data-empty]').hidden = state.photos.length > 0 || !$('[data-draft]').hidden;
+  }
+  function afterChange() { renderThumbs(); updateExport(); renderEmpty(); redraw(); }
+  async function useSamples() {
+    $('[data-hint]').textContent = 'Loading sample photos…';
+    const files = await loadSamplePhotos();
+    if (files.length) { commit(); await addPhotos(files); }
+    $('[data-hint]').textContent = files.length ? 'Sample photos placed — drag a photo to reposition · scroll or pinch to zoom · click a photo for more controls' : 'Sample photos could not be loaded.';
+    afterChange();
+  }
+  $('[data-empty-add]').addEventListener('click', () => { fileTarget = null; fileInput.click(); });
+  $('[data-empty-samples]').addEventListener('click', useSamples);
 
   /* ---------- section handles (resize / move) ---------- */
   const HANDLE_R = 7;
@@ -910,12 +953,22 @@ export function viewCollage(app) {
     resetAll(); discardDraft(); draft.lastSaved = null; renderSaveStatus(); renderSlots(); afterChange();
   });
   $('[data-download]').addEventListener('click', async (e) => {
-    const btn = e.currentTarget;
+    const btn = e.currentTarget, status = $('[data-export-status]'), error = $('[data-export-error]');
+    const preset = presetOf(state), fmt = state.ui.format.toUpperCase();
     btn.disabled = true; btn.textContent = 'Rendering…';
+    error.hidden = true; $('[data-export-done]').hidden = true; status.hidden = false;
+    status.textContent = `Preparing ${fmt} at ${preset.w} × ${preset.h}…`;
     try {
-      state.ui.lastExport = await exportCollage(presetOf(state), state.ui.format);
+      state.ui.lastExport = await exportCollage(preset, state.ui.format, (p) => {
+        if (p.phase === 'fonts') status.textContent = `Loading fonts…`;
+        else if (p.phase === 'photo') status.textContent = `Rendering photo ${p.i} of ${p.n} at ${p.W} × ${p.H}${p.reduced ? ' (reduced — retrying smaller)' : ''}…`;
+        else if (p.phase === 'encode') status.textContent = `Encoding ${fmt} (${p.W} × ${p.H})…`;
+      });
+      status.hidden = true;
     } catch (err) {
-      alert('Export failed — this device could not render the collage. Try a smaller size.');
+      status.hidden = true;
+      error.hidden = false;
+      error.textContent = `Export failed — this device could not render ${preset.w} × ${preset.h}. Try a smaller size, or close other tabs and retry. (${err && err.message ? err.message : err})`;
     } finally {
       btn.disabled = false; btn.textContent = 'Download';
       updateExport();
@@ -931,7 +984,7 @@ export function viewCollage(app) {
     if (!found || !found.photos.length || !hasDraftContent(found.doc)) { draft.enabled = true; return; }
     const when = new Date(found.doc.savedAt);
     $('[data-draft-meta]').textContent = ` · ${found.photos.length} photo${found.photos.length > 1 ? 's' : ''} · ${when.toLocaleDateString()} ${when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-    banner.hidden = false;
+    banner.hidden = false; renderEmpty();
     $('[data-draft-restore]').focus();
   }
   const hasDraftContent = (doc) => doc && (doc.photos?.length || Object.keys(doc.texts || {}).length);
@@ -955,7 +1008,7 @@ export function viewCollage(app) {
     await refreshAll(); renderSaveStatus();
   }
   $('[data-draft-restore]').addEventListener('click', restoreDraft);
-  $('[data-draft-discard]').addEventListener('click', () => { banner.hidden = true; discardDraft(); draft.enabled = true; });
+  $('[data-draft-discard]').addEventListener('click', () => { banner.hidden = true; discardDraft(); draft.enabled = true; renderEmpty(); });
 
   /* ---------- boot ---------- */
   const ro = new ResizeObserver(() => requestAnimationFrame(() => { sizeCanvas(); redraw(); }));
@@ -965,7 +1018,7 @@ export function viewCollage(app) {
   sizeCanvas();
   renderLayouts(); renderSlots(); renderThumbs(); updateExport();
   ensureFonts(styledTheme(state)).then(() => { renderLayouts(); redraw(); });
-  renderSaveStatus();
+  renderSaveStatus(); renderEmpty();
   draw();
   offerDraft();
 }
