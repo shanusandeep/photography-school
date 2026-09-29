@@ -923,3 +923,22 @@ main.pt-full .view { animation: none; }
     font-family: var(--font-mono); font-size: .72rem; letter-spacing: .14em; text-transform: uppercase; cursor: pointer; }
   .nav-account:has([data-nav-signin]) .nav-account-btn { width: 100%; background: var(--amber); color: var(--ink); font-weight: 600; }
 }
+
+/* ---------------- phones: reclaim the space above the content ---------------- */
+@media (max-width: 720px) {
+  main { padding-top: 1rem; padding-bottom: 3rem; }
+  .hero { padding: .4rem 0 1.6rem; gap: 1.8rem; }
+  .hero-kicker { margin-bottom: .7rem; font-size: .62rem; letter-spacing: .12em; }
+  .hero-kicker::before { width: 18px; flex: none; }
+  .hero h1 { font-size: clamp(2.1rem, 10.5vw, 2.8rem); }
+  .hero p.lede { margin-top: .9rem; font-size: 1rem; }
+  .hero-cta { margin-top: 1.3rem; gap: .7rem; }
+  .crumbs { margin-bottom: 1rem; }
+  .module-hero { margin-bottom: 1.6rem; }
+  .lesson-head { margin-bottom: 1.6rem; }
+  .section-head { margin: 2rem 0 1.1rem; }
+  .gate { min-height: 0; }
+  .gate-card .filmstrip { margin-bottom: 1.3rem; }
+  .gate-card .filmstrip img.ph { height: 130px; }
+  .gate-card > *:not(.filmstrip) { margin-left: 1.2rem; margin-right: 1.2rem; }
+}
