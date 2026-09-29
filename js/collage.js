@@ -228,7 +228,7 @@ export function viewCollage(app) {
   app.innerHTML = `
   <div class="view pt">
     <div class="pt-layout" data-layout-root>
-      <aside class="pt-side" aria-label="Collage tools">
+      <aside class="pt-side" id="pt-sheet" aria-label="Collage tools">
         <div class="pt-side-head">
           <span class="mono" style="color:var(--amber)">Collage Maker · free</span>
           <span class="mono" style="color:var(--paper-faint)" data-save-status>photos stay on this device</span>
@@ -236,6 +236,7 @@ export function viewCollage(app) {
         </div>
         <div class="pt-tabs" role="tablist" aria-label="Tool groups">
           ${TABS.map(([id, label]) => `<button role="tab" id="pt-tab-${id}" aria-controls="pt-panel-${id}" aria-selected="${state.ui.tab === id}" tabindex="${state.ui.tab === id ? 0 : -1}" data-tab="${id}">${label}</button>`).join('')}
+          <button class="pt-sheet-close" data-sheet-close aria-label="Close tools">✕</button>
         </div>
         <div class="pt-context" data-context hidden aria-live="polite"></div>
         <div class="pt-panels" data-panels>
@@ -341,6 +342,8 @@ export function viewCollage(app) {
             <button class="btn btn-primary btn-small" data-add-bottom>+ Add photos</button>
             <button class="btn btn-ghost btn-small" data-undo disabled title="Undo (Ctrl/Cmd+Z)" aria-label="Undo">↺ Undo</button>
             <button class="btn btn-ghost btn-small" data-redo disabled title="Redo (Ctrl/Cmd+Shift+Z)" aria-label="Redo">↻ Redo</button>
+            <button class="btn btn-ghost btn-small pt-phone-only pt-edit-chip" data-edit-selected hidden>Edit ▸</button>
+            <button class="btn btn-ghost btn-small pt-phone-only" data-tools aria-expanded="false" aria-controls="pt-sheet">✦ Tools</button>
             <input type="file" accept="image/*" multiple hidden data-file aria-label="Choose photos">
           </div>
           <div class="pt-export">
@@ -379,10 +382,13 @@ export function viewCollage(app) {
   const isDesktop = () => window.matchMedia('(min-width: 901px)').matches;
 
   /* ---------- tool tabs (desktop: always open; phones: a collapsible sheet) ---------- */
-  function showTab(id, { focus = false, toggle = false, keep = false } = {}) {
-    const same = state.ui.tab === id;
-    if (toggle && same && !isDesktop()) { side.classList.toggle('collapsed'); }
-    else { state.ui.tab = id; if (!keep) side.classList.remove('collapsed'); }
+  function setSheet(open) {
+    side.classList.toggle('open', open);
+    $('[data-tools]').setAttribute('aria-expanded', String(open));
+    if (open && !isDesktop()) { const first = side.querySelector('[data-context]:not([hidden]) button, [role="tab"][aria-selected="true"]'); first?.focus(); }
+  }
+  function showTab(id, { focus = false } = {}) {
+    state.ui.tab = id;
     app.querySelectorAll('[role="tab"]').forEach(b => {
       const on = b.dataset.tab === state.ui.tab;
       b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1;
@@ -391,7 +397,10 @@ export function viewCollage(app) {
     app.querySelectorAll('[data-panel]').forEach(p => { p.hidden = p.dataset.panel !== state.ui.tab; });
     sizeCanvas(); redraw();
   }
-  $('.pt-tabs').addEventListener('click', (e) => { const b = e.target.closest('[data-tab]'); if (b) showTab(b.dataset.tab, { toggle: true }); });
+  $('.pt-tabs').addEventListener('click', (e) => { const b = e.target.closest('[data-tab]'); if (b) showTab(b.dataset.tab); });
+  $('[data-sheet-close]').addEventListener('click', () => { setSheet(false); $('[data-tools]').focus(); });
+  $('[data-tools]').addEventListener('click', () => setSheet(!side.classList.contains('open')));
+  $('[data-edit-selected]').addEventListener('click', () => setSheet(true));
   $('.pt-tabs').addEventListener('keydown', (e) => {
     const ids = TABS.map(t => t[0]), k = ids.indexOf(state.ui.tab);
     if (e.key === 'ArrowRight') { e.preventDefault(); showTab(ids[(k + 1) % ids.length], { focus: true }); }
@@ -405,7 +414,7 @@ export function viewCollage(app) {
   function sizeWorkspace() {
     const topbar = document.querySelector('.topbar');
     layoutRoot.style.height = `${window.innerHeight - (topbar ? topbar.offsetHeight : 0)}px`;
-    if (isDesktop()) side.classList.remove('collapsed');
+    if (isDesktop()) side.classList.remove('open');
   }
   function sizeCanvas() {
     const ar = currentShape(state).ar;
@@ -551,7 +560,9 @@ export function viewCollage(app) {
   function renderContext(g) {
     const box = $('[data-context]');
     const i = state.ui.selected, tid = state.ui.selectedText;
-    if ((i !== null || tid) && !isDesktop() && box.hidden) side.classList.remove('collapsed');   // phones: open the sheet so the controls are reachable
+    const chip = $('[data-edit-selected]');
+    chip.hidden = !(i !== null || tid);
+    if (!chip.hidden) chip.textContent = tid ? 'Edit words ▸' : 'Edit photo ▸';
     if (tid) {
       const slot = slotsFor(currentTheme(state), currentLayout(state)).find(x => x.id === tid);
       const ov = textOv(state, tid);
@@ -1026,10 +1037,14 @@ export function viewCollage(app) {
     state.ui.selected = i;
     redraw(); updateExport();
   }, { passive: false });
-  stage.addEventListener('pointerdown', (e) => { if (!wrap.contains(e.target) && !e.target.closest('.pt-draft, .pt-empty')) { deselect(); redraw(); } });
+  stage.addEventListener('pointerdown', (e) => {
+    if (!isDesktop() && side.classList.contains('open')) setSheet(false);
+    if (!wrap.contains(e.target) && !e.target.closest('.pt-draft, .pt-empty')) { deselect(); redraw(); }
+  });
   const onKey = (e) => {
     if (!document.body.contains(canvas)) { document.removeEventListener('keydown', onKey); return; }
     const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) && e.target.type !== 'range';
+    if (e.key === 'Escape' && !isDesktop() && side.classList.contains('open')) { setSheet(false); $('[data-tools]').focus(); return; }
     if (e.key === 'Escape' && (state.ui.selected !== null || state.ui.selectedText)) { deselect(); redraw(); return; }
     if (typing) return;
     const mod = e.metaKey || e.ctrlKey;
@@ -1133,8 +1148,7 @@ export function viewCollage(app) {
   ro.observe(stage);
   window.addEventListener('resize', sizeWorkspace);
   sizeWorkspace();
-  if (!isDesktop()) side.classList.add('collapsed');
-  showTab(state.ui.tab, { keep: true });
+  showTab(state.ui.tab);
   renderLayouts(); renderSlots(); renderPhotos(); updateExport();
   ensureFonts(styledTheme(state)).then(() => { renderLayouts(); redraw(); });
   renderSaveStatus(); renderEmpty();

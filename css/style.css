@@ -878,3 +878,24 @@ main.pt-full .view { animation: none; }
 .pt-course-link { flex-basis: 100%; font-size: .74rem; color: var(--paper-dim); text-decoration: none; margin-top: .35rem; }
 .pt-course-link:hover { color: var(--amber); text-decoration: underline; }
 @media (max-width: 900px) { .pt-course-link { display: none; } }
+
+/* ---------------- phones: tools live in a bottom sheet, closed by default ---------------- */
+.pt-sheet-close, .pt-phone-only { display: none; }
+@media (max-width: 900px) {
+  .pt-phone-only { display: inline-flex; }
+  .pt-edit-chip { border-color: var(--amber); color: var(--amber); }
+  .pt-main { flex: 1 1 auto; min-height: 0; }
+  .pt-side { position: fixed; left: 0; right: 0; bottom: 0; z-index: 45; max-height: 64vh; order: 0; flex: none;
+    border-top: 1px solid var(--amber); border-radius: 14px 14px 0 0; box-shadow: 0 -18px 50px rgba(0,0,0,.55);
+    transform: translateY(105%); transition: transform .22s ease-out; visibility: hidden; padding: 0 .9rem 1rem; }
+  .pt-side.open { transform: none; visibility: visible; }
+  .pt-side.collapsed .pt-panels, .pt-side.collapsed .pt-context { display: block; }
+  .pt-tabs { position: sticky; top: 0; z-index: 2; margin: 0 -.9rem .7rem; background: var(--ink-2); border-radius: 14px 14px 0 0; padding: .35rem .3rem 0 .5rem; }
+  .pt-sheet-close { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 40px; min-height: 44px; margin-left: .2rem;
+    background: none; border: none; color: var(--paper-dim); font-size: .95rem; cursor: pointer; }
+  .pt-bottom [data-download] { order: -1; }
+  .pt-bottom .pt-new-first { order: 5; }
+  .pt-bottom .pt-danger-btn { order: 6; }
+  .pt-bottom select { order: 4; }
+}
+@media (prefers-reduced-motion: reduce) { .pt-side { transition: none; } }
