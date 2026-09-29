@@ -720,3 +720,7 @@ main.pt-full .view { animation: none; }
   * { animation-duration: .01ms !important; transition-duration: .01ms !important; }
   .grain { animation: none; }
 }
+
+/* toolbar: destructive actions stand apart from routine ones */
+.pt-toolbar .pt-danger { color: var(--red); }
+.pt-toolbar .pt-danger:hover { background: var(--red); color: var(--paper); }

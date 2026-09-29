@@ -247,16 +247,21 @@ export function viewCollage(app) {
               <button data-act="swap" title="Swap with another cell" data-photo-only>⇄ Swap</button>
               <span class="pt-sep" data-photo-only></span>
               <button data-act="replace" title="Replace photo" data-photo-only>Replace</button>
-              <button data-act="clear" title="Clear cell" data-photo-only>✕</button>
               <button data-act="add" title="Add a photo here" data-empty-only>+ Add photo</button>
               <button data-act="reset-cell" title="Reset this section's size & position" data-ov-only>↔ Reset size</button>
+              <span class="pt-sep" data-photo-only></span>
+              <button data-act="clear" class="pt-danger" title="Remove the photo from this section" data-photo-only>Clear</button>
+              <span class="pt-sep"></span>
+              <button data-act="done" title="Done — hide these controls" aria-label="Done">✕</button>
             </div>
             <div class="pt-toolbar" data-text-toolbar hidden>
               <button data-tact="smaller" title="Smaller text">A−</button>
               <button data-tact="bigger" title="Bigger text">A+</button>
               <span class="pt-sep"></span>
               <button data-tact="reset" title="Reset position & size">↺ Reset</button>
-              <button data-tact="hide" title="Remove this text">✕ Remove</button>
+              <button data-tact="hide" class="pt-danger" title="Remove this text">Remove</button>
+              <span class="pt-sep"></span>
+              <button data-tact="done" title="Done — hide these controls" aria-label="Done">✕</button>
             </div>
           </div>
           <p class="pt-hint" data-hint>Click an empty cell to add photos · drag a photo to reposition · scroll or pinch to zoom · click a photo for more controls</p>
@@ -389,6 +394,7 @@ export function viewCollage(app) {
     else if (act === 'smaller') setTextOv(state, id, { scale: Math.max(0.4, ov.scale / 1.12) });
     else if (act === 'reset') delete state.textOv[id];
     else if (act === 'hide') { setTextOv(state, id, { hidden: true }); state.ui.selectedText = null; }
+    else if (act === 'done') state.ui.selectedText = null;
     renderSlots(); redraw();
   });
 
@@ -760,9 +766,16 @@ export function viewCollage(app) {
       case 'replace': case 'add': fileTarget = i; fileInput.click(); break;
       case 'clear': clearCell(i); break;
       case 'reset-cell': clearCellOv(state, currentLayout(state), i); renderLayouts(); break;
+      case 'done': deselect(); break;
     }
     afterChange();
   });
+
+  // tapping anywhere outside the collage, or pressing Escape, puts the controls away
+  function deselect() { state.ui.selected = null; state.ui.selectedText = null; state.ui.swapFrom = null; }
+  stage.addEventListener('pointerdown', (e) => { if (!wrap.contains(e.target)) { deselect(); redraw(); } });
+  const onKey = (e) => { if (e.key === 'Escape' && (state.ui.selected !== null || state.ui.selectedText)) { deselect(); redraw(); } };
+  document.addEventListener('keydown', onKey);
 
   /* ---------- file input / tray ---------- */
   fileInput.addEventListener('change', async () => {
