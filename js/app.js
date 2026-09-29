@@ -422,7 +422,8 @@ function nextModuleId(mid) {
 
 /* ---------------- membership gate ---------------- */
 function viewGate() {
-  setNav('syllabus');
+  const section = location.hash.slice(2).split('/')[0];
+  setNav(section === 'collage' ? 'collage' : 'syllabus');   // highlight what the visitor asked for
   pendingHash = location.hash;               // return here after login
   app.innerHTML = `
   <div class="view gate">
