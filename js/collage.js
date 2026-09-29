@@ -340,8 +340,8 @@ export function viewCollage(app) {
         <div class="pt-bottom">
           <div class="pt-actions">
             <button class="btn btn-primary btn-small" data-add-bottom>+ Add photos</button>
-            <button class="btn btn-ghost btn-small" data-undo disabled title="Undo (Ctrl/Cmd+Z)" aria-label="Undo">↺ Undo</button>
-            <button class="btn btn-ghost btn-small" data-redo disabled title="Redo (Ctrl/Cmd+Shift+Z)" aria-label="Redo">↻ Redo</button>
+            <button class="btn btn-ghost btn-small" data-undo disabled title="Undo (Ctrl/Cmd+Z)" aria-label="Undo">↺<span class="pt-lbl"> Undo</span></button>
+            <button class="btn btn-ghost btn-small" data-redo disabled title="Redo (Ctrl/Cmd+Shift+Z)" aria-label="Redo">↻<span class="pt-lbl"> Redo</span></button>
             <button class="btn btn-ghost btn-small pt-phone-only pt-edit-chip" data-edit-selected hidden>Edit ▸</button>
             <button class="btn btn-ghost btn-small pt-phone-only" data-tools aria-expanded="false" aria-controls="pt-sheet">✦ Tools</button>
             <input type="file" accept="image/*" multiple hidden data-file aria-label="Choose photos">

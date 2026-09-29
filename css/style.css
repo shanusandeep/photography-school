@@ -899,3 +899,14 @@ main.pt-full .view { animation: none; }
   .pt-bottom select { order: 4; }
 }
 @media (prefers-reduced-motion: reduce) { .pt-side { transition: none; } }
+
+/* phones: the essentials sit at the front of the action bar, visible without scrolling */
+@media (max-width: 900px) {
+  .pt-bottom [data-tools] { order: -5; }
+  .pt-bottom [data-edit-selected] { order: -4; }
+  .pt-bottom [data-undo] { order: -3; }
+  .pt-bottom [data-redo] { order: -2; }
+  .pt-bottom [data-download] { order: -1; }
+  .pt-bottom [data-undo], .pt-bottom [data-redo] { min-width: 38px; justify-content: center; font-size: .8rem; }
+  .pt-bottom .pt-lbl { display: none; }
+}
