@@ -14,8 +14,9 @@ import {
   styledTheme, accentColor, slotText, textOv, setTextOv, slotsFor, isPhotoCell, firstEmptyPhotoCell, photoCellIndices,
   cellDef, setCellOv, hasCellOv, clearCellOv, geometry as geometryOf, fitPhoto, cellQuality as cellQualityOf,
   setLayout as setLayoutOf, setTheme as setThemeOf, setShape as setShapeOf, swapCells as swapCellsOf, assignPhoto as assignPhotoOf,
-  clearCell as clearCellOf, removePhoto as removePhotoOf, placePhotos, resetDocument, History,
+  clearCell as clearCellOf, removePhoto as removePhotoOf, placePhotos, resetDocument, History, serializeDraft, deserializeDraft, restore,
 } from './collage/core.js';
+import { saveDraft, loadDraft, clearDraft, isQuotaError } from './collage/draft.js';
 import { drawBackground, drawCell, drawForeground, imagePalette as imagePaletteOf, isDark, rotateTo } from './collage/render.js';
 
 /* ============================================================
@@ -174,8 +175,29 @@ async function exportCollage(preset, format) {
   return { ...result, name };
 }
 
+/* ============================================================
+   local draft — autosaved to IndexedDB in this browser only
+   ============================================================ */
+const draft = { enabled: false, timer: 0, failed: null, lastSaved: null, listeners: new Set() };
+function scheduleSave() {
+  if (!draft.enabled) return;
+  clearTimeout(draft.timer);
+  draft.timer = setTimeout(async () => {
+    try {
+      if (!hasContent(state)) { await clearDraft(); draft.lastSaved = null; }     // an empty board is not worth recovering
+      else { await saveDraft(serializeDraft(state), state.photos); draft.lastSaved = Date.now(); }
+      draft.failed = null;
+    } catch (err) {
+      draft.failed = isQuotaError(err) ? 'storage is full' : 'storage is unavailable';
+      draft.enabled = false;                       // stop retrying; editing continues untouched
+    }
+    draft.listeners.forEach(fn => fn());
+  }, 1200);
+}
+function discardDraft() { clearDraft().catch(() => {}); }
+
 // local-dev inspection handle (never on the live site)
-if (['localhost', '127.0.0.1'].includes(location.hostname)) window.__pt = { state, geometry, exportCollage, addPhotos, history };
+if (['localhost', '127.0.0.1'].includes(location.hostname)) window.__pt = { state, geometry, exportCollage, addPhotos, history, draft, loadDraft };
 
 /* ============================================================
    view
@@ -189,7 +211,7 @@ export function viewCollage(app) {
       <aside class="pt-side">
         <div class="pt-side-head">
           <span class="mono" style="color:var(--amber)">Collage Maker · free</span>
-          <span class="mono" style="color:var(--paper-faint)">photos stay on this device</span>
+          <span class="mono" style="color:var(--paper-faint)" data-save-status>photos stay on this device</span>
         </div>
         <section class="pt-step">
           <div class="pt-step-title"><span class="mono">01 · Theme</span></div>
@@ -263,6 +285,13 @@ export function viewCollage(app) {
             </div>
           </div>
           <p class="pt-hint" data-hint>Click an empty cell to add photos · drag a photo to reposition · scroll or pinch to zoom · click a photo for more controls</p>
+          <div class="pt-draft" data-draft hidden role="region" aria-label="Unfinished collage">
+            <div><b>Unfinished collage found</b><span data-draft-meta></span><small>Saved in this browser only — it does not sync to other devices.</small></div>
+            <div class="pt-draft-actions">
+              <button class="btn btn-primary btn-small" data-draft-restore>Restore</button>
+              <button class="btn btn-ghost btn-small" data-draft-discard>Discard</button>
+            </div>
+          </div>
         </div>
 
         <div class="pt-bottom">
@@ -286,6 +315,7 @@ export function viewCollage(app) {
             <p class="pt-export-info" data-export-info></p>
             <p class="pt-export-warn" data-export-warn hidden></p>
             <p class="pt-export-done" data-export-done hidden></p>
+            <p class="pt-export-warn" data-save-note hidden></p>
           </div>
         </div>
       </main>
@@ -366,7 +396,15 @@ export function viewCollage(app) {
     $('[data-layout-reset]').hidden = !state.cellOv[g.layout.id];
   }
   // rAF is paused in hidden tabs; fall back to a timer so state never gets ahead of the canvas
-  const redraw = () => { if (!raf) raf = document.hidden ? setTimeout(draw, 16) : requestAnimationFrame(draw); };
+  const redraw = () => { scheduleSave(); if (!raf) raf = document.hidden ? setTimeout(draw, 16) : requestAnimationFrame(draw); };
+  function renderSaveStatus() {
+    const st = $('[data-save-status]'), note = $('[data-save-note]');
+    if (!st) return;
+    if (draft.failed) { st.textContent = 'draft autosave off'; note.hidden = false; note.textContent = `⚠ Draft autosave is off — ${draft.failed}. Editing still works; download to keep your work.`; }
+    else if (draft.lastSaved) { st.textContent = 'draft saved · this browser only'; note.hidden = true; }
+    else { st.textContent = 'photos stay on this device'; note.hidden = true; }
+  }
+  draft.listeners.clear(); draft.listeners.add(renderSaveStatus);
 
   const textToolbar = $('[data-text-toolbar]');
   function positionTextToolbar(g) {
@@ -869,7 +907,7 @@ export function viewCollage(app) {
   $('[data-redo]').addEventListener('click', doRedo);
   $('[data-new]').addEventListener('click', () => {
     if (hasContent(state) && !confirm('Discard this collage and start a new one?')) return;
-    resetAll(); renderSlots(); afterChange();
+    resetAll(); discardDraft(); draft.lastSaved = null; renderSaveStatus(); renderSlots(); afterChange();
   });
   $('[data-download]').addEventListener('click', async (e) => {
     const btn = e.currentTarget;
@@ -884,6 +922,41 @@ export function viewCollage(app) {
     }
   });
 
+  /* ---------- draft recovery ---------- */
+  const banner = $('[data-draft]');
+  async function offerDraft() {
+    if (hasContent(state)) { draft.enabled = true; return; }
+    let found = null;
+    try { found = await loadDraft(); } catch { /* no storage: just keep editing */ }
+    if (!found || !found.photos.length || !hasDraftContent(found.doc)) { draft.enabled = true; return; }
+    const when = new Date(found.doc.savedAt);
+    $('[data-draft-meta]').textContent = ` · ${found.photos.length} photo${found.photos.length > 1 ? 's' : ''} · ${when.toLocaleDateString()} ${when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+    banner.hidden = false;
+    $('[data-draft-restore]').focus();
+  }
+  const hasDraftContent = (doc) => doc && (doc.photos?.length || Object.keys(doc.texts || {}).length);
+  async function restoreDraft() {
+    banner.hidden = true;
+    $('[data-hint]').textContent = 'Restoring your collage…';
+    let found = null;
+    try { found = await loadDraft(); } catch { found = null; }
+    if (found) {
+      const photosById = {};
+      for (const rec of found.photos) { try { photosById[rec.id] = await decodePhoto(rec.file, rec.id); } catch { /* unreadable file — skipped */ } }
+      const snap = deserializeDraft(found.doc, photosById);
+      if (snap) {
+        restore(state, snap);
+        nextPhotoId = Math.max(nextPhotoId, ...snap.photos.map(p => p.id + 1));
+        history.clear();
+      }
+    }
+    draft.enabled = true; draft.lastSaved = found ? found.doc.savedAt : null;
+    $('[data-hint]').textContent = 'Drag a photo to reposition · scroll or pinch to zoom · click a photo for more controls';
+    await refreshAll(); renderSaveStatus();
+  }
+  $('[data-draft-restore]').addEventListener('click', restoreDraft);
+  $('[data-draft-discard]').addEventListener('click', () => { banner.hidden = true; discardDraft(); draft.enabled = true; });
+
   /* ---------- boot ---------- */
   const ro = new ResizeObserver(() => requestAnimationFrame(() => { sizeCanvas(); redraw(); }));
   ro.observe(stage);
@@ -892,5 +965,7 @@ export function viewCollage(app) {
   sizeCanvas();
   renderLayouts(); renderSlots(); renderThumbs(); updateExport();
   ensureFonts(styledTheme(state)).then(() => { renderLayouts(); redraw(); });
+  renderSaveStatus();
   draw();
+  offerDraft();
 }

@@ -276,3 +276,36 @@ export class History {
     return true;
   }
 }
+
+/* ---------------- draft serialization (pure; storage lives in draft.js) ---------------- */
+import { PALETTES, FONT_SETS } from '../data/collage.js';
+export const DRAFT_VERSION = 1;
+export function serializeDraft(s, now = Date.now()) {
+  const snap = snapshot(s);
+  const pal = s.style.palette;
+  return {
+    v: DRAFT_VERSION, savedAt: now,
+    themeId: snap.themeId, shapeId: snap.shapeId, layoutId: snap.layoutId, accent: snap.accent, spacing: snap.spacing,
+    style: { paletteId: pal && !String(pal.id).startsWith('img-') ? pal.id : null, imagePalette: pal && String(pal.id).startsWith('img-') ? pal : null, fontId: s.style.font?.id || null },
+    photos: snap.photos.map(p => ({ id: p.id, name: p.name, iw: p.iw, ih: p.ih })),
+    cells: snap.cells, texts: snap.texts, textOv: snap.textOv, cellOv: snap.cellOv, hideText: snap.hideText,
+  };
+}
+// rebuild a restorable snapshot from a saved draft and the re-decoded photos (by id);
+// anything that no longer exists (a removed layout, a missing photo) degrades gracefully
+export function deserializeDraft(draft, photosById) {
+  if (!draft || draft.v !== DRAFT_VERSION) return null;
+  const layout = LAYOUTS.find(l => l.id === draft.layoutId) || LAYOUTS[0];
+  const theme = THEMES.find(t => t.id === draft.themeId) || THEMES[0];
+  const shape = SHAPES.find(x => x.id === draft.shapeId) || SHAPES[0];
+  const photos = draft.photos.map(p => photosById[p.id]).filter(Boolean);
+  const ids = new Set(photos.map(p => p.id));
+  let cells = Array.isArray(draft.cells) && draft.cells.length === layout.cells.length
+    ? draft.cells.map(c => ({ ...emptyCell(), ...c, photoId: ids.has(c.photoId) ? c.photoId : null }))
+    : layout.cells.map(emptyCell);
+  return {
+    themeId: theme.id, shapeId: shape.id, layoutId: layout.id, accent: draft.accent || null, spacing: +draft.spacing || 0,
+    style: { palette: draft.style?.imagePalette || PALETTES.find(p => p.id === draft.style?.paletteId) || null, font: FONT_SETS.find(f => f.id === draft.style?.fontId) || null },
+    photos, cells, texts: { ...(draft.texts || {}) }, textOv: { ...(draft.textOv || {}) }, cellOv: { ...(draft.cellOv || {}) }, hideText: draft.hideText !== false,
+  };
+}

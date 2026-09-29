@@ -729,3 +729,13 @@ main.pt-full .view { animation: none; }
 .pt-range { display: grid; grid-template-columns: 70px 1fr 34px; align-items: center; gap: .6rem; margin: .2rem 0 .8rem; }
 .pt-range .mono { color: var(--paper-faint); }
 .pt-range output { font-family: var(--font-mono); font-size: .7rem; color: var(--amber); text-align: right; }
+
+/* draft recovery banner */
+.pt-draft { position: absolute; top: 1rem; left: 50%; transform: translateX(-50%); z-index: 6; max-width: min(560px, calc(100% - 2rem));
+  display: flex; gap: 1rem; align-items: center; justify-content: space-between; flex-wrap: wrap;
+  background: rgba(18,16,13,.96); border: 1px solid var(--amber); border-radius: var(--radius); padding: .8rem 1rem; box-shadow: 0 14px 40px rgba(0,0,0,.5); }
+.pt-draft b { display: block; font-weight: 600; font-size: .92rem; }
+.pt-draft span { font-size: .8rem; color: var(--paper-dim); }
+.pt-draft small { display: block; font-size: .72rem; color: var(--paper-faint); margin-top: .15rem; }
+.pt-draft-actions { display: flex; gap: .5rem; }
+.pt-draft[hidden] { display: none; }
