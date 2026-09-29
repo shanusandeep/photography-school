@@ -468,6 +468,34 @@ function route() {
   return viewHome();
 }
 
+/* ---------------- compact header menu (narrow screens) ---------------- */
+(() => {
+  const toggle = document.getElementById('navToggle'), nav = document.getElementById('topnav');
+  if (!toggle || !nav) return;
+  const isOpen = () => nav.classList.contains('open');
+  const setOpen = (open, { focusToggle = false } = {}) => {
+    nav.classList.toggle('open', open);
+    toggle.setAttribute('aria-expanded', String(open));
+    toggle.setAttribute('aria-label', open ? 'Close menu' : 'Open menu');
+    if (open) nav.querySelector('a')?.focus();
+    else if (focusToggle) toggle.focus();
+  };
+  toggle.addEventListener('click', () => setOpen(!isOpen()));
+  nav.addEventListener('click', (e) => { if (e.target.closest('a')) setOpen(false); });
+  document.addEventListener('keydown', (e) => {
+    if (!isOpen()) return;
+    if (e.key === 'Escape') { e.preventDefault(); setOpen(false, { focusToggle: true }); }
+    if (e.key === 'Tab') {                                    // keep Tab inside the open menu
+      const items = [toggle, ...nav.querySelectorAll('a')];
+      const first = items[0], last = items[items.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+  });
+  document.addEventListener('pointerdown', (e) => { if (isOpen() && !nav.contains(e.target) && !toggle.contains(e.target)) setOpen(false); });
+  window.addEventListener('resize', () => { if (isOpen() && window.innerWidth > 720) setOpen(false); });
+})();
+
 window.addEventListener('hashchange', route);
 
 (async () => {

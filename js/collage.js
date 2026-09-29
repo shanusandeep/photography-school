@@ -233,7 +233,7 @@ export function viewCollage(app) {
           <div class="pt-chips" data-themes>
             ${THEMES.map(t => `<button class="pt-chip ${t.id === state.themeId ? 'on' : ''}" data-theme="${t.id}"><b>${t.name}</b><span>${t.tag}</span></button>`).join('')}
           </div>
-          <label class="pt-accent"><span class="mono">Accent</span><input type="color" data-accent value="${accentColor(state)}"><button class="chip" data-accent-reset>reset</button></label>
+          <label class="pt-accent"><span class="mono">Accent</span><input type="color" data-accent aria-label="Accent colour" value="${accentColor(state)}"><button class="chip" data-accent-reset>reset</button></label>
         </section>
 
         <section class="pt-step">
@@ -257,7 +257,7 @@ export function viewCollage(app) {
 
         <section class="pt-step">
           <div class="pt-step-title"><span class="mono">04 · Layout</span><button class="chip" data-layout-reset hidden>↔ reset sizes</button></div>
-          <p class="pt-note">Click a section to get handles — drag them to resize, drag the grip to move. Photos refit automatically; use zoom to adjust.</p>
+          <p class="pt-note">Click a section to get handles — drag them to resize, drag the grip to move. Photos refit automatically; use zoom to adjust. Keyboard: sections are resized with a pointer only; the panel controls and thumbnails work with Tab and Enter.</p>
           <label class="pt-range"><span class="mono">Spacing</span><input type="range" data-spacing min="0" max="100" value="${state.spacing}" aria-label="Spacing between sections"><output data-spacing-out>${state.spacing}</output></label>
           <div class="pt-layouts" data-layouts></div>
         </section>
@@ -272,29 +272,29 @@ export function viewCollage(app) {
       <main class="pt-main">
         <div class="pt-stage" data-stage>
           <div class="pt-canvas-wrap" data-wrap>
-            <canvas data-preview aria-label="Collage preview"></canvas>
-            <div class="pt-toolbar" data-toolbar hidden>
-              <button data-act="zoom-out" title="Zoom out" data-photo-only>−</button>
-              <button data-act="zoom-in" title="Zoom in" data-photo-only>+</button>
+            <canvas data-preview tabindex="0" role="img" aria-label="Collage preview. Photos and words can be dragged with a pointer; use the panel controls for keyboard editing."></canvas>
+            <div class="pt-toolbar" data-toolbar hidden role="toolbar" aria-label="Selected section">
+              <button data-act="zoom-out" title="Zoom out" data-photo-only aria-label="Zoom out">−</button>
+              <button data-act="zoom-in" title="Zoom in" data-photo-only aria-label="Zoom in">+</button>
               <span class="pt-sep" data-photo-only></span>
-              <button data-act="up" title="Move to previous cell" data-photo-only>↑</button>
-              <button data-act="down" title="Move to next cell" data-photo-only>↓</button>
-              <button data-act="swap" title="Swap with another cell" data-photo-only>⇄ Swap</button>
+              <button data-act="up" title="Move to previous cell" data-photo-only aria-label="Move photo to previous section">↑</button>
+              <button data-act="down" title="Move to next cell" data-photo-only aria-label="Move photo to next section">↓</button>
+              <button data-act="swap" title="Swap with another cell" data-photo-only aria-label="Swap with another section">⇄ Swap</button>
               <span class="pt-sep" data-photo-only></span>
-              <button data-act="replace" title="Replace photo" data-photo-only>Replace</button>
-              <button data-act="add" title="Add a photo here" data-empty-only>+ Add photo</button>
-              <button data-act="reset-cell" title="Reset this section's size & position" data-ov-only>↔ Reset size</button>
+              <button data-act="replace" title="Replace photo" data-photo-only aria-label="Replace photo">Replace</button>
+              <button data-act="add" title="Add a photo here" data-empty-only aria-label="Add a photo here">+ Add photo</button>
+              <button data-act="reset-cell" title="Reset this section's size & position" data-ov-only aria-label="Reset section size and position">↔ Reset size</button>
               <span class="pt-sep" data-photo-only></span>
-              <button data-act="clear" class="pt-danger" title="Remove the photo from this section" data-photo-only>Clear</button>
+              <button data-act="clear" class="pt-danger" title="Remove the photo from this section" data-photo-only aria-label="Remove photo from section">Clear</button>
               <span class="pt-sep"></span>
               <button data-act="done" title="Done — hide these controls" aria-label="Done">✕</button>
             </div>
-            <div class="pt-toolbar" data-text-toolbar hidden>
-              <button data-tact="smaller" title="Smaller text">A−</button>
-              <button data-tact="bigger" title="Bigger text">A+</button>
+            <div class="pt-toolbar" data-text-toolbar hidden role="toolbar" aria-label="Selected text">
+              <button data-tact="smaller" title="Smaller text" aria-label="Smaller text">A−</button>
+              <button data-tact="bigger" title="Bigger text" aria-label="Bigger text">A+</button>
               <span class="pt-sep"></span>
-              <button data-tact="reset" title="Reset position & size">↺ Reset</button>
-              <button data-tact="hide" class="pt-danger" title="Remove this text">Remove</button>
+              <button data-tact="reset" title="Reset position & size" aria-label="Reset text position and size">↺ Reset</button>
+              <button data-tact="hide" class="pt-danger" title="Remove this text" aria-label="Remove this text">Remove</button>
               <span class="pt-sep"></span>
               <button data-tact="done" title="Done — hide these controls" aria-label="Done">✕</button>
             </div>
@@ -323,7 +323,7 @@ export function viewCollage(app) {
           <div class="pt-tray">
             <button class="btn btn-primary btn-small" data-add>+ Add photos</button>
             <div class="pt-thumbs" data-thumbs></div>
-            <input type="file" accept="image/*" multiple hidden data-file>
+            <input type="file" accept="image/*" multiple hidden data-file aria-label="Choose photos">
           </div>
           <div class="pt-export">
             <div class="pt-export-row">
@@ -640,15 +640,19 @@ export function viewCollage(app) {
     }
     state.photos.forEach(p => {
       const inCell = state.cells.findIndex(c => c.photoId === p.id);
-      const el = document.createElement('div');
+      const el = document.createElement('button');
+      el.type = 'button';
       el.className = `pt-thumb ${inCell >= 0 ? 'placed' : ''}`;
-      el.title = inCell >= 0 ? `${p.name} — in cell ${inCell + 1}. Click to move to the selected cell.` : `${p.name} — not placed. Click to place.`;
+      el.title = inCell >= 0 ? `${p.name} — in section ${inCell + 1}. Click to move to the selected section.` : `${p.name} — not placed. Click to place.`;
+      el.setAttribute('aria-label', el.title);
       const c = makeCanvas(64, 64), cx = c.getContext('2d');
       const k = Math.max(64 / p.bmp.width, 64 / p.bmp.height);
       cx.drawImage(p.bmp, (64 - p.bmp.width * k) / 2, (64 - p.bmp.height * k) / 2, p.bmp.width * k, p.bmp.height * k);
       el.appendChild(c);
       if (inCell >= 0) { const b = document.createElement('i'); b.textContent = inCell + 1; el.appendChild(b); }
-      const rm = document.createElement('button'); rm.textContent = '✕'; rm.title = 'Remove photo';
+      const rm = document.createElement('span'); rm.className = 'pt-thumb-remove'; rm.setAttribute('role', 'button'); rm.tabIndex = 0;
+      rm.textContent = '✕'; rm.title = `Remove ${p.name}`; rm.setAttribute('aria-label', rm.title);
+      rm.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); removePhoto(p.id); afterChange(); } });
       rm.addEventListener('click', (e) => { e.stopPropagation(); removePhoto(p.id); afterChange(); });
       el.appendChild(rm);
       el.addEventListener('click', () => {

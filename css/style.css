@@ -10,7 +10,7 @@
   --line: #352f24;           /* hairlines */
   --paper: #ece5d8;          /* fibre-paper white */
   --paper-dim: #b3a893;      /* faded caption */
-  --paper-faint: #7d7462;    /* whisper */
+  --paper-faint: #948a77;    /* whisper — 4.8:1+ on every surface (WCAG AA for small text) */
   --amber: #e8a33d;          /* safelight */
   --amber-hot: #f6c268;
   --red: #cf4a2e;            /* developer tray red */
@@ -584,8 +584,8 @@ main.pt-full .view { animation: none; }
 .pt-thumb:hover { opacity: 1; transform: translateY(-2px); }
 .pt-thumb canvas { display: block; }
 .pt-thumb i { position: absolute; left: 3px; bottom: 3px; background: var(--amber); color: var(--ink); font-style: normal; font-family: var(--font-mono); font-size: .6rem; padding: 0 .35rem; border-radius: 2px; }
-.pt-thumb button { position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; border-radius: 50%; border: none; background: rgba(18,16,13,.85); color: var(--paper); font-size: .6rem; cursor: pointer; display: none; }
-.pt-thumb:hover button { display: block; }
+.pt-thumb .pt-thumb-remove { position: absolute; top: 2px; right: 2px; width: 20px; height: 20px; border-radius: 50%; border: none; background: rgba(18,16,13,.85); color: var(--paper); font-size: .6rem; cursor: pointer; display: none; align-items: center; justify-content: center; }
+.pt-thumb:hover .pt-thumb-remove, .pt-thumb:focus-within .pt-thumb-remove { display: flex; }
 
 .pt-export { margin: 0; }
 .pt-export-row { display: flex; gap: .6rem; align-items: end; flex-wrap: wrap; }
@@ -756,3 +756,35 @@ main.pt-full .view { animation: none; }
 .pt-empty small { font-size: clamp(.62rem, 2.4cqw, .74rem); }
 .pt-empty h2 { font-size: clamp(1.2rem, 6cqw, 2.2rem); }
 @container (max-width: 420px) { .pt-empty { padding: 1rem; gap: .35rem; } .pt-empty small { display: none; } .pt-empty .btn { padding: .6rem .9rem; font-size: .62rem; } }
+
+/* ---------------- accessibility ---------------- */
+:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; border-radius: 3px; }
+.pt-toolbar button:focus-visible, .chip:focus-visible, .pt-chip:focus-visible, .pt-layout-btn:focus-visible { outline-offset: 1px; }
+.pt-thumb { border: 1px solid var(--line); background: none; padding: 0; }
+.pt-thumb:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; opacity: 1; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* ---------------- compact header on narrow screens ---------------- */
+.nav-toggle { display: none; margin-left: auto; background: none; border: 1px solid var(--line); border-radius: var(--radius); color: var(--paper);
+  font-family: var(--font-mono); font-size: .72rem; letter-spacing: .12em; text-transform: uppercase; padding: .5rem .8rem; cursor: pointer; min-height: 44px; }
+.nav-toggle[aria-expanded="true"] { border-color: var(--amber); color: var(--amber); }
+@media (max-width: 720px) {
+  .topbar { flex-wrap: nowrap; gap: .7rem; padding: .55rem .9rem; }
+  .topbar-progress { display: none; }
+  .nav-toggle { display: inline-flex; align-items: center; gap: .5rem; }
+  .topnav { display: none; position: absolute; left: 0; right: 0; top: 100%; flex-direction: column; gap: 0;
+    background: var(--ink-2); border-bottom: 1px solid var(--line); box-shadow: 0 18px 40px rgba(0,0,0,.5); z-index: 60; margin: 0; }
+  .topnav.open { display: flex; }
+  .topnav a { padding: .95rem 1.2rem; border-bottom: 1px solid var(--line); border-left: 3px solid transparent; font-size: .8rem; min-height: 44px; display: flex; align-items: center; }
+  .topnav a.active { border-left-color: var(--amber); border-bottom-color: var(--line); }
+  .topbar-auth .btn-small { padding: .55rem .8rem; min-height: 40px; }
+  .user-chip { padding: .2rem .6rem .2rem .2rem; }
+  .user-name { display: none; }
+}
+@media (max-width: 720px) {
+  .topbar .brand { flex: 1 1 auto; min-width: 0; }
+  .brand-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .nav-toggle, .topbar-auth { flex: none; }
+  .pt-bottom .pt-tray { flex-wrap: wrap; }
+  .pt-tray-empty { flex-basis: 100%; }
+}
